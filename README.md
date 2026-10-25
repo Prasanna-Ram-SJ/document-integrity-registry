@@ -126,10 +126,10 @@ Configuration settings are centralized in [`src/config/tezos.ts`](src/config/tez
 
 | Setting | Variable Name | Configuration Value |
 | :--- | :--- | :--- |
-| **Network** | `VITE_TEZOS_NETWORK` | Set this value locally; do not put it in the README. |
-| **RPC URL** | `VITE_TEZOS_RPC_URL` | Set this value locally; do not put it in the README. |
-| **Contract Address** | `VITE_DOCUMENT_REGISTRY_ADDRESS` | Set this value locally; do not put it in the README. |
-| **Admin Address** | `VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS` | Set this value locally; do not put it in the README. |
+| **Network** | `VITE_TEZOS_NETWORK` | /* Private Data */ |
+| **RPC URL** | `VITE_TEZOS_RPC_URL` | /* Private Data */ |
+| **Contract Address** | `VITE_DOCUMENT_REGISTRY_ADDRESS` | /* Private Data */ |
+| **Admin Address** | `VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS` | /* Private Data */ |
 
 ---
 
