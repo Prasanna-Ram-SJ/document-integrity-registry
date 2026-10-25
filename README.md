@@ -215,10 +215,10 @@ cp .env.example .env
 ```
 
 Configure the required environment settings in your local `.env` file:
-- `VITE_TEZOS_NETWORK`: Set this value locally; do not put it in the README.
-- `VITE_TEZOS_RPC_URL`: Set this value locally; do not put it in the README.
-- `VITE_DOCUMENT_REGISTRY_ADDRESS`: Set this value locally; do not put it in the README.
-- `VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS`: Set this value locally; do not put it in the README.
+- `VITE_TEZOS_NETWORK`: /* Private Data */
+- `VITE_TEZOS_RPC_URL`: /* Private Data */
+- `VITE_DOCUMENT_REGISTRY_ADDRESS`: /* Private Data */
+- `VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS`: /* Private Data */
 
 > [!IMPORTANT]
 > Never put private keys, seed phrases, passwords, or secrets into `.env` or any project file. The `.env` file is excluded from Git via `.gitignore`. Do not commit real environment values to Git or paste them into documentation.
