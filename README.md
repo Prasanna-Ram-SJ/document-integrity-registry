@@ -63,7 +63,7 @@ flowchart TD
         B --> C["Generate UUID v4 Record ID\n& Enter Short Label"]
         C --> D["Connect Temple Wallet\n(Tezos Shadownet)"]
         D --> E["Submit 'register' Transaction\n(Admin-Restricted Entrypoint)"]
-        E --> F[("Tezos Shadownet Big_Map\nKT1Wpi46oEzpUosPBW7YWoHkZrjNNzQrDGXL")]
+        E --> F[("Tezos Shadownet Big_Map\n(Contract Storage)")]
     end
 
     subgraph Verification ["2. Verification (Public & Read-Only)"]
@@ -99,7 +99,7 @@ The application consists of a single-page React client talking directly to the T
 ┌────────────────────────────────────────────────────────┐
 │              Tezos Shadownet Testnet                   │
 │                                                        │
-│  SmartPy Contract: KT1Wpi46oEzpUosPBW7YWoHkZrjNNzQrDGXL│
+│  SmartPy Document Registry Contract                    │
 │  - Entrypoint: register(record_id, label, sha256)      │
 │  - On-Chain View: get_record(record_id)                │
 └────────────────────────────────────────────────────────┘
@@ -110,8 +110,8 @@ The application consists of a single-page React client talking directly to the T
 The contract is written in [SmartPy](https://smartpy.io) and originated to Tezos Shadownet:
 
 - **Source Code**: [`contracts/document_registry.py`](contracts/document_registry.py)
-- **Contract Address**: `KT1Wpi46oEzpUosPBW7YWoHkZrjNNzQrDGXL`
-- **Configured Registrar Admin**: `tz1dmo2H7rmwf8KGx11oQhqHda51iE6t1das`
+- **Contract Address**: Set this value locally; do not put it in the README.
+- **Configured Registrar Admin**: Set this value locally; do not put it in the README.
 - **Write Entrypoint**: `register(params: record(record_id: string, label: string, sha256: string))`
   - Restricts execution strictly to `sp.sender == self.data.admin`.
   - Prevents record collisions (`assert not (params.record_id in self.data.records)`).
@@ -124,12 +124,12 @@ The contract is written in [SmartPy](https://smartpy.io) and originated to Tezos
 
 Configuration settings are centralized in [`src/config/tezos.ts`](src/config/tezos.ts) and populated via environment variables:
 
-| Setting | Variable Name | Default / Shadownet Value |
+| Setting | Variable Name | Configuration Value |
 | :--- | :--- | :--- |
-| **Network** | `VITE_TEZOS_NETWORK` | `shadownet` |
-| **RPC URL** | `VITE_TEZOS_RPC_URL` | `https://rpc.shadownet.teztnets.com` |
-| **Contract Address** | `VITE_DOCUMENT_REGISTRY_ADDRESS` | `KT1Wpi46oEzpUosPBW7YWoHkZrjNNzQrDGXL` |
-| **Admin Address** | `VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS` | `tz1dmo2H7rmwf8KGx11oQhqHda51iE6t1das` |
+| **Network** | `VITE_TEZOS_NETWORK` | Set this value locally; do not put it in the README. |
+| **RPC URL** | `VITE_TEZOS_RPC_URL` | Set this value locally; do not put it in the README. |
+| **Contract Address** | `VITE_DOCUMENT_REGISTRY_ADDRESS` | Set this value locally; do not put it in the README. |
+| **Admin Address** | `VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS` | Set this value locally; do not put it in the README. |
 
 ---
 
@@ -143,7 +143,7 @@ Registration allows authorized team leads or registrars to record a document's f
 2. **Local Fingerprint**: The browser immediately calculates the 64-character SHA-256 fingerprint.
 3. **Auto-Generated Record ID**: A standard UUID v4 (e.g., `4fa9c680-e387-4340-a337-128a30ef1d2f`) is created automatically.
 4. **Enter Label**: Enter a short label describing the document (up to 100 printable ASCII characters, e.g., `Club Constitution v2.1`).
-5. **Connect Temple Wallet**: Connect Temple wallet configured to **Tezos Shadownet**. The UI verifies that your connected account matches the on-chain registrar admin address (`tz1dmo2H7rmwf8KGx11oQhqHda51iE6t1das`).
+5. **Connect Temple Wallet**: Connect Temple wallet configured to **Tezos Shadownet**. The UI verifies that your connected account matches the configured on-chain registrar admin address.
 6. **Sign Transaction**: Click **Register on Tezos Shadownet**. Temple wallet prompts you to approve the `register` invocation.
 7. **Confirmation & Receipt**: Once confirmed on-chain (1 block confirmation), the confirmed Record ID, fingerprint, transaction hash, registrar address, and timestamp are displayed with convenient copy buttons.
 
@@ -208,23 +208,20 @@ npm install
 
 ### Environment Configuration
 
-The repository includes a template file [` .env.example`](.env.example). Create your local `.env`:
+The repository includes a template configuration file [`.env.example`](.env.example). Create your local `.env` file from the template:
 
 ```bash
 cp .env.example .env
 ```
 
-Ensure `.env` contains the deployed Shadownet contract details:
-
-```env
-VITE_TEZOS_NETWORK=shadownet
-VITE_TEZOS_RPC_URL=https://rpc.shadownet.teztnets.com
-VITE_DOCUMENT_REGISTRY_ADDRESS=KT1Wpi46oEzpUosPBW7YWoHkZrjNNzQrDGXL
-VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS=tz1dmo2H7rmwf8KGx11oQhqHda51iE6t1das
-```
+Configure the required environment settings in your local `.env` file:
+- `VITE_TEZOS_NETWORK`: Set this value locally; do not put it in the README.
+- `VITE_TEZOS_RPC_URL`: Set this value locally; do not put it in the README.
+- `VITE_DOCUMENT_REGISTRY_ADDRESS`: Set this value locally; do not put it in the README.
+- `VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS`: Set this value locally; do not put it in the README.
 
 > [!IMPORTANT]
-> Never put private keys, seed phrases, passwords, or secrets into `.env` or any project file. The `.env` file is excluded from Git via `.gitignore`.
+> Never put private keys, seed phrases, passwords, or secrets into `.env` or any project file. The `.env` file is excluded from Git via `.gitignore`. Do not commit real environment values to Git or paste them into documentation.
 
 ### Running the Website
 
@@ -357,7 +354,7 @@ The smart contract [`contracts/document_registry.py`](contracts/document_registr
 
 To register documents, your admin account needs testnet tez for gas:
 1. Open [Tezos Shadownet Faucet](https://teztnets.com/shadownet-about).
-2. Request test tez to your public Temple address (`tz1...`).
+2. Request test tez to your public Temple account address.
 3. Transactions on Shadownet confirm in roughly 8 to 15 seconds.
 
 </details>
@@ -372,7 +369,7 @@ The website supports both Temple's direct browser provider and Beacon. If Temple
 <details>
 <summary><strong>Why does verification work without connecting my wallet?</strong></summary>
 
-Verification uses Tezos on-chain views (`get_record`). On-chain views are read-only queries executed against the public Tezos RPC node (`https://rpc.shadownet.teztnets.com`). Because read queries do not modify state or consume tez, no signature, wallet connection, or transaction fee is required.
+Verification uses Tezos on-chain views (`get_record`). On-chain views are read-only queries executed against the public Tezos RPC node. Because read queries do not modify state or consume tez, no signature, wallet connection, or transaction fee is required.
 
 </details>
 
