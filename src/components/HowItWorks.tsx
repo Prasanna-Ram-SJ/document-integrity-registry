@@ -40,9 +40,9 @@ export const HowItWorks: React.FC = () => {
 
           <div className="process-card">
             <span className="process-step-num">STEP 04</span>
-            <h3 className="process-card-title">Verify Anytime Without a Wallet</h3>
+            <h3 className="process-card-title">Verify by Label Without a Wallet</h3>
             <p className="process-card-desc">
-              Anyone with a file and its Record ID can verify the file against the on-chain view. Verification is strictly read-only and requires no wallet, signature, or fees.
+              Anyone with a file can search by document label to verify against the on-chain record without needing to remember raw IDs. Verification is strictly read-only and requires no wallet, signature, or fees.
             </p>
           </div>
         </div>

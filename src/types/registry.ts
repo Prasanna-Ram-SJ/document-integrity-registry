@@ -54,6 +54,11 @@ export interface NetworkConfig {
   adminAddress: string;
 }
 
+export interface DocumentCatalogEntry {
+  record_id: string;
+  label: string;
+}
+
 export interface WalletState {
   connected: boolean;
   address: string | null;

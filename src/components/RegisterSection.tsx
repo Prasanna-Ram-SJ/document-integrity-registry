@@ -1,5 +1,13 @@
-import React, { useState, useRef, ChangeEvent, DragEvent } from 'react';
+import React, { useState, useRef, useEffect, ChangeEvent, DragEvent } from 'react';
 import { TEZOS_CONFIG, isContractConfigured } from '../config/tezos';
+import { isSupabaseConfigured } from '../config/supabase';
+import {
+  insertDocumentToCatalog,
+  getCurrentSupabaseUser,
+  signInRegistrar,
+  signOutRegistrar,
+} from '../services/supabaseCatalogue';
+import type { User } from '@supabase/supabase-js';
 import {
   computeFileSha256,
   generateRecordId,
@@ -13,6 +21,13 @@ interface RegisterSectionProps {
   walletState: WalletState;
   onConnectWallet: () => Promise<void>;
 }
+
+type CatalogueSyncState =
+  | { status: 'IDLE' }
+  | { status: 'SAVING' }
+  | { status: 'SUCCESS' }
+  | { status: 'FAILED'; error: string; isRlsError?: boolean; record_id: string; label: string }
+  | { status: 'NOT_CONFIGURED' };
 
 export const RegisterSection: React.FC<RegisterSectionProps> = ({
   walletState,
@@ -31,9 +46,128 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
+  // Supabase catalogue sync states
+  const [catalogueState, setCatalogueState] = useState<CatalogueSyncState>({ status: 'IDLE' });
+  const [isRetryingCatalogue, setIsRetryingCatalogue] = useState<boolean>(false);
+  const [supabaseUser, setSupabaseUser] = useState<User | null>(null);
+  const [showLoginForm, setShowLoginForm] = useState<boolean>(false);
+  const [loginEmail, setLoginEmail] = useState<string>('');
+  const [loginPassword, setLoginPassword] = useState<string>('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const contractConfigured = isContractConfigured();
+  const supabaseConfigured = isSupabaseConfigured();
+
+  // Load current Supabase user on mount
+  useEffect(() => {
+    if (supabaseConfigured) {
+      getCurrentSupabaseUser()
+        .then((user) => setSupabaseUser(user))
+        .catch(() => setSupabaseUser(null));
+    }
+  }, [supabaseConfigured]);
+
+  const syncToCatalogue = async (recId: string, lbl: string) => {
+    if (!supabaseConfigured) {
+      setCatalogueState({ status: 'NOT_CONFIGURED' });
+      return;
+    }
+
+    setCatalogueState({ status: 'SAVING' });
+    try {
+      const catRes = await insertDocumentToCatalog({
+        record_id: recId,
+        label: lbl,
+      });
+
+      if (catRes.success) {
+        setCatalogueState({ status: 'SUCCESS' });
+      } else {
+        setCatalogueState({
+          status: 'FAILED',
+          error: catRes.error || 'Failed to save to Supabase document catalogue.',
+          isRlsError: catRes.isRlsError,
+          record_id: recId,
+          label: lbl,
+        });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setCatalogueState({
+        status: 'FAILED',
+        error: msg,
+        record_id: recId,
+        label: lbl,
+      });
+    }
+  };
+
+  const handleRetryCatalogueInsert = async () => {
+    if (catalogueState.status !== 'FAILED') return;
+    setIsRetryingCatalogue(true);
+    try {
+      const catRes = await insertDocumentToCatalog({
+        record_id: catalogueState.record_id,
+        label: catalogueState.label,
+      });
+      if (catRes.success) {
+        setCatalogueState({ status: 'SUCCESS' });
+      } else {
+        setCatalogueState({
+          ...catalogueState,
+          error: catRes.error || 'Retry failed.',
+          isRlsError: catRes.isRlsError,
+        });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setCatalogueState({
+        ...catalogueState,
+        error: msg,
+      });
+    } finally {
+      setIsRetryingCatalogue(false);
+    }
+  };
+
+  const handleSupabaseLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginEmail.trim() || !loginPassword.trim()) {
+      setLoginError('Email and password are required.');
+      return;
+    }
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      const user = await signInRegistrar(loginEmail, loginPassword);
+      setSupabaseUser(user);
+      setShowLoginForm(false);
+      setLoginPassword('');
+      // If catalogue insert previously failed with RLS, immediately retry
+      if (catalogueState.status === 'FAILED') {
+        const catRes = await insertDocumentToCatalog({
+          record_id: catalogueState.record_id,
+          label: catalogueState.label,
+        });
+        if (catRes.success) {
+          setCatalogueState({ status: 'SUCCESS' });
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setLoginError(msg);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleSupabaseLogout = async () => {
+    await signOutRegistrar();
+    setSupabaseUser(null);
+  };
 
   // Process a selected file
   const handleFileChange = async (selectedFile: File) => {
@@ -135,6 +269,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
 
     setIsSubmitting(true);
     setOutcome({ step: 'AWAITING_APPROVAL' });
+    setCatalogueState({ status: 'IDLE' });
 
     try {
       const res = await registerDocumentOnChain({
@@ -143,6 +278,11 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
         sha256: computedSha256,
       });
       setOutcome(res);
+
+      if (res.step === 'CONFIRMED') {
+        // Blockchain registration succeeded: now sync to Supabase document catalogue
+        await syncToCatalogue(recordId, label.trim());
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setOutcome({
@@ -179,6 +319,115 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
           <strong>Your file stays in this browser.</strong> Only its fingerprint and record details are registered on chain.
         </span>
       </div>
+
+      {/* Supabase Catalogue Registrar Session Bar */}
+      {supabaseConfigured && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '8px',
+          padding: '8px 12px',
+          marginBottom: '16px',
+          backgroundColor: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          borderRadius: '8px',
+          fontSize: '13px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontWeight: 600 }}>Catalogue Sync:</span>
+            {supabaseUser ? (
+              <span style={{ color: 'var(--dp-color-success)' }}>
+                ● Signed in as <code>{supabaseUser.email}</code>
+              </span>
+            ) : (
+              <span style={{ color: 'var(--dp-color-ink-secondary)' }}>
+                ○ Not signed in (Required for RLS catalogue sync)
+              </span>
+            )}
+          </div>
+          <div>
+            {supabaseUser ? (
+              <button
+                type="button"
+                onClick={handleSupabaseLogout}
+                className="btn btn-secondary btn-small"
+                style={{ padding: '4px 10px', fontSize: '12px' }}
+              >
+                Sign Out
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowLoginForm(!showLoginForm)}
+                className="btn btn-secondary btn-small"
+                style={{ padding: '4px 10px', fontSize: '12px' }}
+              >
+                {showLoginForm ? 'Cancel Login' : 'Registrar Login'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Registrar Login Modal / Form */}
+      {showLoginForm && (
+        <form onSubmit={handleSupabaseLogin} style={{
+          padding: '16px',
+          marginBottom: '16px',
+          backgroundColor: '#ffffff',
+          border: '1px solid var(--dp-color-accent)',
+          borderRadius: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+        }}>
+          <h4 style={{ fontSize: '14px', marginBottom: '8px' }}>Sign In as Authorized Registrar (Supabase)</h4>
+          <p style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)', marginBottom: '12px' }}>
+            Sign in with the registrar credentials configured in your Supabase Auth dashboard to satisfy Row Level Security on catalogue inserts.
+          </p>
+          {loginError && (
+            <div style={{ color: 'var(--dp-color-danger)', fontSize: '12px', marginBottom: '8px' }}>
+              {loginError}
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+            <input
+              type="email"
+              placeholder="Registrar email"
+              value={loginEmail}
+              onChange={(e) => setLoginEmail(e.target.value)}
+              className="form-input"
+              style={{ fontSize: '13px', padding: '8px 10px' }}
+              required
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              className="form-input"
+              style={{ fontSize: '13px', padding: '8px 10px' }}
+              required
+            />
+          </div>
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={() => setShowLoginForm(false)}
+              className="btn btn-secondary btn-small"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isLoggingIn}
+              className="btn btn-primary btn-small"
+            >
+              {isLoggingIn ? 'Signing in...' : 'Sign In'}
+            </button>
+          </div>
+        </form>
+      )}
 
       {/* Contract Configuration Warning if not deployed */}
       {!contractConfigured && (
@@ -336,9 +585,12 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
             </div>
 
             <div className="preview-row">
-              <span className="preview-label">Record ID (Auto-generated UUID)</span>
+              <span className="preview-label">Record ID</span>
               <div className="preview-value-group">
-                <div className="preview-value">{recordId}</div>
+                <code className="masked-value">•••••••• 🔒</code>
+                <span style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)' }}>
+                  (Auto-generated UUID; visually masked)
+                </span>
                 <button
                   type="button"
                   onClick={handleRegenerateId}
@@ -349,32 +601,23 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
                 >
                   New ID
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleCopyText(recordId, 'preview-id')}
-                  className="copy-btn"
-                  aria-label="Copy record ID"
-                >
-                  {copiedField === 'preview-id' ? 'Copied' : 'Copy'}
-                </button>
               </div>
             </div>
 
             <div className="preview-row">
-              <span className="preview-label">SHA-256 Fingerprint (Local Browser Hash)</span>
+              <span className="preview-label">SHA-256 Fingerprint</span>
               <div className="preview-value-group">
-                <div className="preview-value">
-                  {isHashing ? 'Computing cryptographic hash...' : computedSha256}
-                </div>
-                {computedSha256 && (
-                  <button
-                    type="button"
-                    onClick={() => handleCopyText(computedSha256, 'preview-hash')}
-                    className="copy-btn"
-                    aria-label="Copy SHA-256 fingerprint"
-                  >
-                    {copiedField === 'preview-hash' ? 'Copied' : 'Copy'}
-                  </button>
+                {isHashing ? (
+                  <span style={{ fontSize: '13px', color: 'var(--dp-color-ink-secondary)' }}>
+                    Computing cryptographic fingerprint...
+                  </span>
+                ) : (
+                  <>
+                    <code className="masked-value">•••••••• 🔒</code>
+                    <span style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)' }}>
+                      (Computed in browser; visually masked)
+                    </span>
+                  </>
                 )}
               </div>
             </div>
@@ -416,32 +659,29 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
                 Document Version Successfully Registered on Shadownet!
               </div>
               <div style={{ fontSize: 'var(--dp-typography-small)', marginBottom: '8px' }}>
-                Save the Record ID below. You or anyone else can use it to verify copies of this document later.
+                Your document version has been recorded on Tezos Shadownet and its label synced to the catalogue.
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px' }}>
                 <div className="preview-value-group">
+                  <span style={{ fontWeight: 600, width: '90px', fontSize: '12px' }}>Document:</span>
+                  <span style={{ fontWeight: 600 }}>{outcome.label || label}</span>
+                </div>
+
+                <div className="preview-value-group">
                   <span style={{ fontWeight: 600, width: '90px', fontSize: '12px' }}>Record ID:</span>
-                  <code className="preview-value">{outcome.recordId}</code>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyText(outcome.recordId!, 'confirmed-id')}
-                    className="copy-btn"
-                  >
-                    {copiedField === 'confirmed-id' ? 'Copied' : 'Copy ID'}
-                  </button>
+                  <code className="masked-value">•••••••• 🔒</code>
+                  <span style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)' }}>
+                    (Visual mask)
+                  </span>
                 </div>
 
                 <div className="preview-value-group">
                   <span style={{ fontWeight: 600, width: '90px', fontSize: '12px' }}>Fingerprint:</span>
-                  <code className="preview-value">{outcome.sha256}</code>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyText(outcome.sha256!, 'confirmed-hash')}
-                    className="copy-btn"
-                  >
-                    {copiedField === 'confirmed-hash' ? 'Copied' : 'Copy Hash'}
-                  </button>
+                  <code className="masked-value">•••••••• 🔒</code>
+                  <span style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)' }}>
+                    (Visual mask)
+                  </span>
                 </div>
 
                 {outcome.txHash && (
@@ -458,6 +698,110 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Visual Masking Educational Notice */}
+              <div className="mask-notice" style={{ marginTop: '10px' }} role="note">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+                <div>
+                  <strong>Visual masking note (<code>•••••••• 🔒</code>):</strong> Record IDs and fingerprints are visually masked on this screen. This visual masking does not make on-chain data private: all data stored on Tezos Shadownet can still be inspected outside this app using an RPC node or block explorer.
+                </div>
+              </div>
+
+              {/* Supabase Document Catalogue Sync State */}
+              {catalogueState.status === 'SAVING' && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '10px 12px',
+                  backgroundColor: '#f0f9ff',
+                  borderRadius: '8px',
+                  border: '1px solid #bae6fd',
+                  fontSize: '13px',
+                  color: '#0369a1'
+                }}>
+                  Syncing document label to Supabase search catalogue...
+                </div>
+              )}
+
+              {catalogueState.status === 'SUCCESS' && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '10px 12px',
+                  backgroundColor: '#f0fdf4',
+                  borderRadius: '8px',
+                  border: '1px solid #bbf7d0',
+                  fontSize: '13px',
+                  color: '#15803d'
+                }}>
+                  ✓ <strong>Added to Document Catalogue:</strong> Users can now find and verify this document by searching for "<strong>{outcome.label || label}</strong>" without needing the raw Record ID.
+                </div>
+              )}
+
+              {catalogueState.status === 'NOT_CONFIGURED' && (
+                <div style={{
+                  marginTop: '12px',
+                  padding: '10px 12px',
+                  backgroundColor: '#f8fafc',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                  fontSize: '13px',
+                  color: 'var(--dp-color-ink-secondary)'
+                }}>
+                  ℹ️ <strong>Supabase Catalogue Not Configured:</strong> The document is securely registered on Tezos Shadownet. To enable label-based search, configure <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_PUBLISHABLE_KEY</code>.
+                </div>
+              )}
+
+              {catalogueState.status === 'FAILED' && (
+                <div className="state-box state-box-warning" style={{ marginTop: '14px', textAlign: 'left' }} role="alert">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                  <div style={{ width: '100%' }}>
+                    <div style={{ fontWeight: 700, marginBottom: '4px', color: 'var(--dp-color-warning)' }}>
+                      Blockchain registration succeeded, but catalogue update failed
+                    </div>
+                    <div style={{ fontSize: '13px', marginBottom: '8px' }}>
+                      The document was successfully registered on Tezos Shadownet. However, saving the label to the Supabase lookup catalogue failed:
+                      <div style={{ marginTop: '4px', fontWeight: 600, color: 'var(--dp-color-danger)' }}>
+                        {catalogueState.error}
+                      </div>
+                    </div>
+
+                    {catalogueState.isRlsError && !supabaseUser && (
+                      <div style={{ marginBottom: '10px', padding: '8px 10px', background: '#fff', borderRadius: '6px', border: '1px solid #fde68a' }}>
+                        <p style={{ fontSize: '12px', marginBottom: '6px' }}>
+                          Row Level Security requires you to sign in as the authorized registrar before saving to the catalogue:
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setShowLoginForm(!showLoginForm)}
+                          className="btn btn-secondary btn-small"
+                        >
+                          {showLoginForm ? 'Close Login' : 'Sign In as Registrar'}
+                        </button>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={handleRetryCatalogueInsert}
+                        disabled={isRetryingCatalogue}
+                        className="btn btn-secondary btn-small"
+                      >
+                        {isRetryingCatalogue ? 'Retrying Catalogue Insert...' : 'Retry Catalogue Insert'}
+                      </button>
+                      <span style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)' }}>
+                        (Retries only the catalogue update without submitting another Tezos transaction)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

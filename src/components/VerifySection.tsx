@@ -1,8 +1,14 @@
-import React, { useState, useRef, ChangeEvent, DragEvent } from 'react';
+import React, { useState, useRef, useEffect, ChangeEvent, DragEvent } from 'react';
 import { isContractConfigured } from '../config/tezos';
+import { isSupabaseConfigured } from '../config/supabase';
+import {
+  searchDocumentsByLabel,
+  DocumentCatalogEntry,
+} from '../services/supabaseCatalogue';
 import {
   computeFileSha256,
-  isValidUuid,
+  formatReadableTimestamp,
+  formatFileSize,
 } from '../services/crypto';
 import {
   fetchRecordFromChain,
@@ -14,19 +20,73 @@ export const VerifySection: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [computedSha256, setComputedSha256] = useState<string>('');
   const [isHashing, setIsHashing] = useState<boolean>(false);
-  const [recordId, setRecordId] = useState<string>('');
-  const [recordIdError, setRecordIdError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
 
-  // Verification outcome state
+  // Label Autocomplete Search state
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [suggestions, setSuggestions] = useState<DocumentCatalogEntry[]>([]);
+  const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [showDropdown, setShowDropdown] = useState<boolean>(false);
+  const [duplicateLabels, setDuplicateLabels] = useState<string[]>([]);
+  const [selectedEntry, setSelectedEntry] = useState<DocumentCatalogEntry | null>(null);
+
+  // Verification execution states
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
   const [result, setResult] = useState<VerificationResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const contractConfigured = isContractConfigured();
+  const searchContainerRef = useRef<HTMLDivElement>(null);
 
+  const contractConfigured = isContractConfigured();
+  const supabaseConfigured = isSupabaseConfigured();
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(e.target as Node)
+      ) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Debounced autocomplete search against Supabase catalogue
+  useEffect(() => {
+    if (!supabaseConfigured || selectedEntry) {
+      return;
+    }
+
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setSuggestions([]);
+      setDuplicateLabels([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const searchRes = await searchDocumentsByLabel(trimmed);
+        setSuggestions(searchRes.entries);
+        setDuplicateLabels(searchRes.duplicateLabels);
+        setShowDropdown(true);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, selectedEntry, supabaseConfigured]);
+
+  // Handle document file change
   const handleFileChange = async (selectedFile: File) => {
     setFile(selectedFile);
     setIsHashing(true);
@@ -76,37 +136,32 @@ export const VerifySection: React.FC = () => {
     }
   };
 
-  const handleRecordIdChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.trim();
-    setRecordId(val);
+  // Autocomplete selection
+  const handleSelectSuggestion = (entry: DocumentCatalogEntry) => {
+    setSelectedEntry(entry);
+    setSearchQuery(entry.label);
+    setShowDropdown(false);
     setResult(null);
     setErrorMessage(null);
-    if (val && !isValidUuid(val)) {
-      setRecordIdError('Record ID must be a valid RFC 4122 UUID (e.g. 123e4567-e89b-12d3-a456-426614174000).');
-    } else {
-      setRecordIdError(null);
-    }
   };
 
-  const handleCopyText = async (text: string, fieldName: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopiedField(fieldName);
-    setTimeout(() => setCopiedField(null), 2000);
+  const handleClearSelection = () => {
+    setSelectedEntry(null);
+    setSearchQuery('');
+    setSuggestions([]);
+    setShowDropdown(false);
+    setResult(null);
+    setErrorMessage(null);
   };
 
+  // Verification execution
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!file || !computedSha256) return;
 
-    const trimmedId = recordId.trim();
-    if (!trimmedId) {
-      setRecordIdError('Record ID is required.');
-      return;
-    }
-
-    if (!isValidUuid(trimmedId)) {
-      setRecordIdError('Please enter a valid UUID record ID.');
+    if (!selectedEntry || !selectedEntry.record_id.trim()) {
+      setErrorMessage('Please type part of a document label and choose a matching suggestion.');
       return;
     }
 
@@ -122,8 +177,10 @@ export const VerifySection: React.FC = () => {
     setErrorMessage(null);
 
     try {
-      const storedRecord = await fetchRecordFromChain(trimmedId);
-      const evalResult = evaluateVerification(trimmedId, computedSha256, storedRecord);
+      // Use record_id internally from selected catalogue entry without displaying raw ID
+      const targetRecordId = selectedEntry.record_id.trim();
+      const storedRecord = await fetchRecordFromChain(targetRecordId);
+      const evalResult = evaluateVerification(targetRecordId, computedSha256, storedRecord);
       setResult({
         ...evalResult,
         fileName: file.name,
@@ -140,15 +197,14 @@ export const VerifySection: React.FC = () => {
   const isFormValid =
     file !== null &&
     computedSha256.length === 64 &&
-    recordId.trim().length > 0 &&
-    !recordIdError;
+    selectedEntry !== null;
 
   return (
     <div className="panel-card" id="verify">
       <div className="card-header-area">
         <h2 className="card-title">Verify Document Copy</h2>
         <p className="card-subtitle">
-          Select a file and enter its record ID to check whether its cryptographic fingerprint matches the registered version.
+          Select a document copy and search its label to verify whether its cryptographic fingerprint matches the on-chain version.
         </p>
       </div>
 
@@ -177,8 +233,22 @@ export const VerifySection: React.FC = () => {
         </div>
       )}
 
+      {/* Supabase unconfigured warning */}
+      {!supabaseConfigured && (
+        <div className="state-box state-box-warning" role="alert">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <div>
+            <strong>Supabase catalogue not configured:</strong> Label search requires <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_PUBLISHABLE_KEY</code> in <code>.env.local</code>.
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleVerify} noValidate>
-        {/* File Picker */}
+        {/* Step 1: File Picker */}
         <div className="form-group">
           <label className="form-label" htmlFor="verify-file-input">
             Select Document to Verify <span className="required">*</span>
@@ -207,7 +277,7 @@ export const VerifySection: React.FC = () => {
                   fileInputRef.current?.click();
                 }
               }}
-              aria-label="Click or drag and drop a file to verify its cryptographic hash"
+              aria-label="Click or drag and drop a file to calculate its cryptographic fingerprint"
             >
               <div className="file-dropzone-inner">
                 <svg className="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -219,7 +289,7 @@ export const VerifySection: React.FC = () => {
                 </svg>
                 <div className="dropzone-text">Choose file to verify or drag it here</div>
                 <div className="dropzone-subtext" id="verify-file-hint">
-                  The file is read locally and its SHA-256 fingerprint is computed in browser.
+                  The file is read locally and its cryptographic fingerprint is computed in browser.
                 </div>
               </div>
             </div>
@@ -227,7 +297,10 @@ export const VerifySection: React.FC = () => {
             <div className="file-selected-box">
               <div className="file-details">
                 <span className="file-name" title={file.name}>{file.name}</span>
-                <span className="file-size">{(file.size / 1024).toFixed(1)} KB</span>
+                <span className="file-size">
+                  {(file.size / 1024).toFixed(1)} KB
+                  {isHashing && ' • Computing local fingerprint in browser...'}
+                </span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
@@ -251,53 +324,115 @@ export const VerifySection: React.FC = () => {
           )}
         </div>
 
-        {/* Record ID Input */}
-        <div className="form-group">
-          <label className="form-label" htmlFor="verify-record-id">
-            Record ID (UUID) <span className="required">*</span>
+        {/* Step 2: Document Label Autocomplete Search */}
+        <div className="form-group" ref={searchContainerRef}>
+          <label className="form-label" htmlFor="verify-label-search">
+            Find Registered Document by Label <span className="required">*</span>
           </label>
-          <input
-            id="verify-record-id"
-            type="text"
-            className="form-input font-mono"
-            value={recordId}
-            onChange={handleRecordIdChange}
-            placeholder="e.g. 123e4567-e89b-12d3-a456-426614174000"
-            required
-            aria-invalid={recordIdError ? 'true' : 'false'}
-            aria-describedby="record-id-hint"
-          />
-          <span className="form-hint" id="record-id-hint">
-            {recordIdError ? (
-              <span style={{ color: 'var(--dp-color-danger)' }}>{recordIdError}</span>
-            ) : (
-              'Enter the UUID assigned when this document version was registered.'
-            )}
+
+          {selectedEntry ? (
+            <div className="selected-label-card">
+              <div className="selected-label-info">
+                <span className="selected-label-name">Selected: {selectedEntry.label}</span>
+                <span className="selected-label-sub" style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)' }}>
+                  Ready to verify against Tezos registration
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleClearSelection}
+                className="btn btn-secondary btn-small"
+                aria-label="Change selected document"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <div className="autocomplete-wrapper">
+              <input
+                id="verify-label-search"
+                type="text"
+                className="form-input"
+                placeholder="Type part of the document label (e.g. Club Constitution, Bylaws)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => {
+                  if (suggestions.length > 0) setShowDropdown(true);
+                }}
+                autoComplete="off"
+                disabled={!supabaseConfigured}
+                aria-autocomplete="list"
+                aria-controls="verify-autocomplete-list"
+                aria-expanded={showDropdown}
+              />
+
+              {isSearching && (
+                <div style={{ position: 'absolute', right: '12px', top: '12px', fontSize: '12px', color: 'var(--dp-color-ink-secondary)' }}>
+                  Searching...
+                </div>
+              )}
+
+              {/* Autocomplete Suggestions Dropdown */}
+              {showDropdown && (
+                <div className="autocomplete-dropdown" id="verify-autocomplete-list" role="listbox">
+                  {suggestions.length > 0 ? (
+                    <>
+                      {suggestions.map((entry, idx) => {
+                        const isDuplicate = duplicateLabels.some(
+                          (dup) => dup.toLowerCase() === entry.label.toLowerCase()
+                        );
+                        const occurrenceIndex = suggestions
+                          .slice(0, idx + 1)
+                          .filter((item) => item.label.toLowerCase() === entry.label.toLowerCase()).length;
+                        const totalOccurrences = suggestions.filter(
+                          (item) => item.label.toLowerCase() === entry.label.toLowerCase()
+                        ).length;
+
+                        return (
+                          <div
+                            key={`${entry.record_id}-${idx}`}
+                            className="autocomplete-item"
+                            onClick={() => handleSelectSuggestion(entry)}
+                            role="option"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSelectSuggestion(entry);
+                            }}
+                          >
+                            <span className="autocomplete-label-text">{entry.label}</span>
+                            {isDuplicate && (
+                              <span className="autocomplete-duplicate-badge">
+                                Choice {occurrenceIndex} of {totalOccurrences}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {duplicateLabels.length > 0 && (
+                        <div className="autocomplete-duplicate-alert">
+                          <strong>Note on duplicate labels:</strong> Multiple registrations exist for{' '}
+                          <em>"{duplicateLabels.join('", "')}"</em>. Because the catalogue stores strictly the label and record ID without extra metadata, each matching entry is shown as a separate choice above. You can choose each option to verify your file against that registration.
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    searchQuery.trim().length > 0 &&
+                    !isSearching && (
+                      <div className="autocomplete-empty">
+                        No registered documents found matching "<strong>{searchQuery}</strong>".
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <span className="form-hint" style={{ marginTop: '6px', display: 'block' }}>
+            Type part of the document label to see autocomplete suggestions. Choosing a suggestion selects its record internally.
           </span>
         </div>
-
-        {/* Calculated Hash Preview */}
-        {file && (
-          <div className="preview-box" style={{ margin: '16px 0' }}>
-            <div className="preview-row">
-              <span className="preview-label">Computed Local SHA-256</span>
-              <div className="preview-value-group">
-                <code className="preview-value">
-                  {isHashing ? 'Computing hash in browser...' : computedSha256}
-                </code>
-                {computedSha256 && (
-                  <button
-                    type="button"
-                    onClick={() => handleCopyText(computedSha256, 'verify-hash')}
-                    className="copy-btn"
-                  >
-                    {copiedField === 'verify-hash' ? 'Copied' : 'Copy'}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Query Error State */}
         {errorMessage && (
@@ -319,7 +454,7 @@ export const VerifySection: React.FC = () => {
           {result && `Verification result: ${result.outcome}. ${result.message}`}
         </div>
 
-        {/* Verification Outcomes: Exactly MATCH, MISMATCH, RECORD NOT FOUND */}
+        {/* Public Verification Result Screen */}
         {result && (
           <div
             className={`outcome-card ${
@@ -355,48 +490,57 @@ export const VerifySection: React.FC = () => {
             </div>
 
             <h3 className="outcome-title">
-              {result.outcome === 'MATCH' && 'Document matches registered fingerprint'}
-              {result.outcome === 'MISMATCH' && 'Document differs from registered version'}
-              {result.outcome === 'RECORD NOT FOUND' && 'No record found for this Record ID'}
+              {result.outcome === 'MATCH' && 'Document Match'}
+              {result.outcome === 'MISMATCH' && 'Document Mismatch'}
+              {result.outcome === 'RECORD NOT FOUND' && 'Record Not Found'}
             </h3>
 
-            <p className="outcome-explanation">{result.message}</p>
+            <p className="outcome-explanation">
+              {result.outcome === 'MATCH' &&
+                'This file matches the fingerprint registered for this label on Tezos.'}
+              {result.outcome === 'MISMATCH' &&
+                'This file does not match the fingerprint registered for this label on Tezos.'}
+              {result.outcome === 'RECORD NOT FOUND' &&
+                'No record was found on Tezos for this document label.'}
+            </p>
 
-            {/* Comparison Details Grid */}
+            {/* Public Comparison Details */}
             <div className="comparison-grid">
-              <div className="comparison-item">
-                <span className="comparison-label">Record ID Checked</span>
-                <code className="comparison-code">{result.recordId}</code>
-              </div>
+              {(result.fileName || file) && (
+                <div className="comparison-item">
+                  <span className="comparison-label">YOUR DOCUMENT</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <span
+                      style={{
+                        fontWeight: 600,
+                        fontSize: '15px',
+                        wordBreak: 'break-word',
+                        overflowWrap: 'anywhere',
+                      }}
+                    >
+                      {result.fileName || file?.name}
+                    </span>
+                    <span style={{ fontSize: '13px', color: 'var(--dp-color-ink-secondary)' }}>
+                      {formatFileSize(result.fileSize ?? file?.size)}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="comparison-item">
-                <span className="comparison-label">Selected File Fingerprint</span>
-                <code className="comparison-code">{result.computedSha256}</code>
+                <span className="comparison-label">DOCUMENT LABEL</span>
+                <span style={{ fontWeight: 600, fontSize: '15px' }}>
+                  {selectedEntry?.label || result.storedRecord?.label || 'Verified Document'}
+                </span>
               </div>
 
-              {result.storedRecord && (
-                <>
-                  <div className="comparison-item">
-                    <span className="comparison-label">Registered On-Chain Fingerprint</span>
-                    <code className="comparison-code">{result.storedRecord.sha256}</code>
-                  </div>
-                  <div className="comparison-item">
-                    <span className="comparison-label">Registered Label</span>
-                    <span style={{ fontWeight: 600 }}>{result.storedRecord.label}</span>
-                  </div>
-                  <div className="comparison-item">
-                    <span className="comparison-label">Registrar Address</span>
-                    <code className="comparison-code">{result.storedRecord.registrar}</code>
-                  </div>
-                  {result.storedRecord.registered_at && (
-                    <div className="comparison-item">
-                      <span className="comparison-label">Registration Timestamp</span>
-                      <span style={{ fontSize: '13px', color: 'var(--dp-color-ink-secondary)' }}>
-                        {result.storedRecord.registered_at}
-                      </span>
-                    </div>
-                  )}
-                </>
+              {result.storedRecord?.registered_at && (
+                <div className="comparison-item">
+                  <span className="comparison-label">REGISTRATION TIMESTAMP</span>
+                  <span style={{ fontSize: '14px', color: 'var(--dp-color-ink)' }}>
+                    {formatReadableTimestamp(result.storedRecord.registered_at)}
+                  </span>
+                </div>
               )}
             </div>
           </div>

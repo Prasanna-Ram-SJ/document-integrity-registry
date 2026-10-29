@@ -5,6 +5,8 @@ import {
   isValidSha256,
   isValidUuid,
   validateLabel,
+  formatReadableTimestamp,
+  formatFileSize,
 } from '../services/crypto';
 
 describe('Local SHA-256 hashing and formatting', () => {
@@ -74,5 +76,38 @@ describe('Label validation (SmartPy ASCII compatibility)', () => {
   it('rejects non-printable ASCII or unicode characters', () => {
     expect(validateLabel('Document 📄').valid).toBe(false);
     expect(validateLabel('Project—Final').valid).toBe(false); // Em-dash is not ASCII
+  });
+});
+
+describe('Timestamp formatting', () => {
+  it('formats ISO timestamps into readable date and time with timezone', () => {
+    const formatted = formatReadableTimestamp('2026-10-27T18:06:21Z');
+    expect(formatted).toBeDefined();
+    expect(typeof formatted).toBe('string');
+    expect(formatted).toContain('2026');
+    expect(formatted).toMatch(/Oct/);
+    expect(formatted).toMatch(/(AM|PM)/);
+  });
+
+  it('handles empty or invalid date strings gracefully', () => {
+    expect(formatReadableTimestamp('')).toBe('');
+    expect(formatReadableTimestamp('invalid-date')).toBe('invalid-date');
+  });
+});
+
+describe('File size formatting', () => {
+  it('formats small files in bytes', () => {
+    expect(formatFileSize(540)).toBe('540 bytes');
+    expect(formatFileSize(0)).toBe('0 bytes');
+  });
+
+  it('formats kilobyte and megabyte sizes accurately', () => {
+    expect(formatFileSize(45 * 1024)).toBe('45 KB');
+    expect(formatFileSize(2.4 * 1024 * 1024)).toBe('2.4 MB');
+  });
+
+  it('handles undefined or invalid numbers gracefully', () => {
+    expect(formatFileSize(undefined)).toBe('');
+    expect(formatFileSize(NaN)).toBe('');
   });
 });

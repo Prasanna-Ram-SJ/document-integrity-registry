@@ -76,3 +76,48 @@ export function validateLabel(label: string): { valid: boolean; error?: string }
   }
   return { valid: true };
 }
+
+/**
+ * Formats a registration timestamp (e.g. ISO 8601 string from on-chain record)
+ * into a readable date and time with its timezone (for example: "27 Oct 2026, 11:36 PM IST").
+ * Preserves the original timestamp string if parsing fails.
+ */
+export function formatReadableTimestamp(timestampStr: string): string {
+  if (!timestampStr) return '';
+  const date = new Date(timestampStr);
+  if (isNaN(date.getTime())) {
+    return timestampStr;
+  }
+
+  // Format with day, short month, year, time, and timezone name
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  });
+
+  return formatter.format(date).replace(/\b(am|pm)\b/gi, (match) => match.toUpperCase());
+}
+
+/**
+ * Formats a file size in bytes into an easy-to-read string (e.g. "540 bytes", "2.4 MB").
+ */
+export function formatFileSize(bytes?: number): string {
+  if (bytes === undefined || bytes === null || isNaN(bytes)) return '';
+  if (bytes < 1024) {
+    return `${bytes} bytes`;
+  } else if (bytes < 1024 * 1024) {
+    const kb = bytes / 1024;
+    return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  } else if (bytes < 1024 * 1024 * 1024) {
+    const mb = bytes / (1024 * 1024);
+    return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+  } else {
+    const gb = bytes / (1024 * 1024 * 1024);
+    return `${gb.toFixed(1)} GB`;
+  }
+}
