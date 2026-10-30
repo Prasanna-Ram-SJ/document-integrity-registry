@@ -8,13 +8,20 @@ import { HowItWorks } from './components/HowItWorks';
 import { LimitationNotice } from './components/LimitationNotice';
 import { Footer } from './components/Footer';
 import {
-  connectTempleWallet,
-  disconnectTempleWallet,
+  connectWallet,
+  disconnectWallet,
   checkActiveWalletAccount,
 } from './services/tezosAdapter';
+import {
+  Theme,
+  getSavedTheme,
+  applyThemeToDOM,
+  toggleThemeWithTransition,
+} from './utils/theme';
 import { WalletState } from './types/registry';
 
 export const App: React.FC = () => {
+  const [theme, setTheme] = useState<Theme>(getSavedTheme);
   const [activeTab, setActiveTab] = useState<'verify' | 'register'>('verify');
   const [walletState, setWalletState] = useState<WalletState>({
     connected: false,
@@ -23,6 +30,36 @@ export const App: React.FC = () => {
     error: null,
     isAdmin: false,
   });
+
+  // Ensure DOM matches theme state on mount
+  useEffect(() => {
+    applyThemeToDOM(theme);
+  }, [theme]);
+
+  // Return to the top on true page reload while preserving Back/Forward and in-page navigation
+  useEffect(() => {
+    let isReload = false;
+    try {
+      const navEntries = performance.getEntriesByType('navigation');
+      if (navEntries.length > 0) {
+        isReload = (navEntries[0] as PerformanceNavigationTiming).type === 'reload';
+      } else if ((performance as any).navigation) {
+        isReload = (performance as any).navigation.type === 1;
+      }
+    } catch {
+      isReload = false;
+    }
+
+    if (isReload) {
+      window.scrollTo(0, 0);
+      const timer = setTimeout(() => {
+        if ('scrollRestoration' in window.history) {
+          window.history.scrollRestoration = 'auto';
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   // Check if there is already an active session established in previous turns without requesting new permissions
   useEffect(() => {
@@ -43,7 +80,7 @@ export const App: React.FC = () => {
   const handleConnectWallet = useCallback(async () => {
     setWalletState((prev) => ({ ...prev, isConnecting: true, error: null }));
     try {
-      const { address, isAdmin } = await connectTempleWallet();
+      const { address, isAdmin } = await connectWallet();
       setWalletState({
         connected: true,
         address,
@@ -58,12 +95,13 @@ export const App: React.FC = () => {
         message.includes('Declined') ||
         message.includes('ABORTED') ||
         message.includes('User rejected') ||
-        message.includes('NOT_GRANTED')
+        message.includes('NOT_GRANTED') ||
+        message.includes('cancelled')
       ) {
-        friendlyError = 'Wallet connection was declined or cancelled in Temple wallet.';
+        friendlyError = 'Wallet connection was declined or cancelled.';
       } else if (message.includes('timed out')) {
         friendlyError =
-          'Connection timed out. Please ensure Temple Wallet extension is installed, unlocked, and connected to Tezos Shadownet.';
+          'Connection timed out. Please ensure your wallet extension is installed, unlocked, and connected to Tezos Shadownet.';
       } else {
         friendlyError = `Wallet connection failed: ${message}`;
       }
@@ -80,7 +118,7 @@ export const App: React.FC = () => {
   // Explicit user-initiated wallet disconnection
   const handleDisconnectWallet = useCallback(async () => {
     try {
-      await disconnectTempleWallet();
+      await disconnectWallet();
     } finally {
       setWalletState({
         connected: false,
@@ -95,6 +133,18 @@ export const App: React.FC = () => {
   const handleClearError = useCallback(() => {
     setWalletState((prev) => ({ ...prev, error: null }));
   }, []);
+
+  // User toggled theme with radial reveal animation
+  const handleToggleTheme = useCallback(
+    async (e: React.MouseEvent<HTMLButtonElement>) => {
+      const buttonEl = e.currentTarget;
+      const coords =
+        e.clientX > 0 && e.clientY > 0 ? { x: e.clientX, y: e.clientY } : null;
+      const next = await toggleThemeWithTransition(theme, buttonEl, coords);
+      setTheme(next);
+    },
+    [theme]
+  );
 
   // Scroll to absolute top (scrollY = 0) from anywhere on the page
   const handleNavigateHome = useCallback(() => {
@@ -210,6 +260,8 @@ export const App: React.FC = () => {
         onNavigateHome={handleNavigateHome}
         onNavigateRegister={handleNavigateRegister}
         onNavigateVerify={handleNavigateVerify}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
       />
 
       <main id="main-content">
@@ -225,12 +277,12 @@ export const App: React.FC = () => {
 
         <FactualStrip />
 
-        {/* Functional Registry Area */}
+        {/* Functional D.A.R.T Workspace Area */}
         <section className="registry-section" id="workspace" aria-labelledby="workspace-title">
           <div className="container">
             <div className="section-intro">
               <h2 id="workspace-title" className="section-title">
-                Registry Workspace
+                D.A.R.T Workspace
               </h2>
               <p className="section-subtitle">
                 Verify existing document copies or register new authoritative versions on Tezos Shadownet.
@@ -238,7 +290,7 @@ export const App: React.FC = () => {
             </div>
 
             {/* In-page Tab switcher */}
-            <div className="registry-tabs" role="tablist" aria-label="Registry Operations">
+            <div className="registry-tabs" role="tablist" aria-label="D.A.R.T Operations">
               <div className="tab-container">
                 <button
                   type="button"
@@ -286,6 +338,7 @@ export const App: React.FC = () => {
               <RegisterSection
                 walletState={walletState}
                 onConnectWallet={handleConnectWallet}
+                onNavigateRegister={handleNavigateRegister}
               />
             </div>
           </div>

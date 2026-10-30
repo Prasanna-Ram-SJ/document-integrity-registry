@@ -19,6 +19,80 @@ export interface CatalogueInsertResult {
   success: boolean;
   error?: string;
   isRlsError?: boolean;
+  isDuplicateLabelError?: boolean;
+}
+
+export interface LabelAvailabilityResult {
+  available: boolean;
+  isDuplicate?: boolean;
+  existingRecordId?: string;
+  error?: string;
+}
+
+/**
+ * Normalizes a document label for exact uniqueness comparison:
+ * Trims leading/trailing whitespace and converts to lowercase.
+ */
+export function normalizeLabel(label: string): string {
+  return label.trim().toLowerCase();
+}
+
+/**
+ * Checks whether a document label is available for registration.
+ * Performs exact normalized matching against the Supabase catalogue
+ * (ignoring case and surrounding whitespace).
+ *
+ * If the check fails (e.g. network/database error), reports the error
+ * rather than assuming the label is available.
+ */
+export async function checkLabelAvailability(
+  rawLabel: string
+): Promise<LabelAvailabilityResult> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      available: false,
+      error: 'Supabase catalogue is not configured in .env.local (missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY).',
+    };
+  }
+
+  const clean = rawLabel.trim();
+  if (!clean) {
+    return {
+      available: false,
+      error: 'Label cannot be empty.',
+    };
+  }
+
+  // Exact case-insensitive matching query
+  const { data, error } = await client
+    .from('document_catalog')
+    .select('record_id, label')
+    .ilike('label', clean);
+
+  if (error) {
+    return {
+      available: false,
+      error: `Catalogue verification failed: ${error.message}`,
+    };
+  }
+
+  // Find any collision matching normalized label (lowercase and trimmed)
+  const targetNorm = normalizeLabel(clean);
+  const collision = (data || []).find(
+    (row) => normalizeLabel(String(row.label)) === targetNorm
+  );
+
+  if (collision) {
+    return {
+      available: false,
+      isDuplicate: true,
+      existingRecordId: String(collision.record_id),
+      error: 'This label is already registered. Please choose a different label.',
+    };
+  }
+
+  return { available: true };
 }
 
 /**
@@ -113,18 +187,28 @@ export async function insertDocumentToCatalog(
       error.message.toLowerCase().includes('row-level security') ||
       error.message.toLowerCase().includes('violates row-level security');
 
+    const isUniqueViolation = error.code === '23505';
+    let isDuplicateLabel = false;
     let friendlyError = error.message;
+
     if (isRls) {
       friendlyError =
         'Permission denied by Row Level Security policy. Registrar authentication is required to insert into the catalogue.';
-    } else if (error.code === '23505') {
-      friendlyError = 'This Tezos record ID is already listed in the catalogue.';
+    } else if (isUniqueViolation) {
+      const details = `${error.details || ''} ${error.message}`.toLowerCase();
+      if (details.includes('label') || details.includes('document_catalog_normalized_label_idx')) {
+        isDuplicateLabel = true;
+        friendlyError = 'This label is already registered. Please choose a different label.';
+      } else {
+        friendlyError = 'This Tezos record ID is already listed in the catalogue.';
+      }
     }
 
     return {
       success: false,
       error: friendlyError,
       isRlsError: isRls,
+      isDuplicateLabelError: isDuplicateLabel,
     };
   }
 

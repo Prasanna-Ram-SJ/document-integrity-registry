@@ -228,7 +228,7 @@ export const VerifySection: React.FC = () => {
             <line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
           <div>
-            <strong>Contract not configured:</strong> The registry contract address (<code>VITE_DOCUMENT_REGISTRY_ADDRESS</code>) is not yet set. Verification requires a deployed Shadownet contract.
+            <strong>Contract not configured:</strong> The D.A.R.T contract address (<code>VITE_DOCUMENT_REGISTRY_ADDRESS</code>) is not yet set. Verification requires a deployed Shadownet contract.
           </div>
         </div>
       )}

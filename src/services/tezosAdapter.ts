@@ -33,7 +33,7 @@ export function getBeaconWallet(): BeaconWallet {
         : NetworkType.CUSTOM;
 
     walletInstance = new BeaconWallet({
-      name: 'Document Integrity Registry',
+      name: 'D.A.R.T',
       preferredNetwork: networkType,
       network: {
         type: networkType,
@@ -197,90 +197,226 @@ export async function fetchRecordFromChain(recordId: string): Promise<DocumentRe
   }
 }
 
-/**
- * Connect to Temple Wallet.
- * Uses Temple's direct browser extension provider if available,
- * and falls back to Beacon Wallet if direct provider is not present.
- * Explicit user action only. Requires Shadownet.
- */
-export async function connectTempleWallet(): Promise<{ address: string; isAdmin: boolean }> {
-  // 1. Check if Temple extension is available in the browser
-  let isTempleAvailable = false;
+export const EXPLICIT_DISCONNECT_STORAGE_KEY = 'dart_wallet_explicitly_disconnected';
+
+export function isWalletExplicitlyDisconnected(): boolean {
   try {
-    isTempleAvailable = await TempleWallet.isAvailable();
+    return typeof window !== 'undefined' && window.localStorage.getItem(EXPLICIT_DISCONNECT_STORAGE_KEY) === 'true';
   } catch {
-    isTempleAvailable = false;
+    return false;
   }
+}
 
-  if (isTempleAvailable) {
-    try {
-      const temple = new TempleWallet('Document Integrity Registry');
-      await temple.connect(
-        {
-          name: 'shadownet',
-          rpc: TEZOS_CONFIG.rpcUrl,
-        },
-        { forcePermission: true }
-      );
-      const address = await temple.getPKH();
-      getTezosToolkit().setWalletProvider(temple as any);
-      templeInstance = temple;
-      activeWalletType = 'temple';
-
-      const isAdmin = TEZOS_CONFIG.adminAddress
-        ? address.toLowerCase() === TEZOS_CONFIG.adminAddress.toLowerCase()
-        : true;
-
-      return { address, isAdmin };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (
-        msg.includes('NotGranted') ||
-        msg.includes('Permission not granted') ||
-        msg.includes('declined') ||
-        msg.includes('cancelled')
-      ) {
-        throw new Error('Connection request was declined in Temple wallet.');
-      }
-      throw err;
-    }
-  }
-
-  // 2. Fall back to Beacon Wallet
-  const wallet = getBeaconWallet();
-  activeWalletType = 'beacon';
-
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutHandle = setTimeout(() => {
-      reject(
-        new Error(
-          'Wallet connection request timed out. Please ensure Temple Wallet extension is installed, unlocked, and connected to Tezos Shadownet.'
-        )
-      );
-    }, 45000);
-  });
-
+export function setWalletExplicitlyDisconnected(disconnected: boolean): void {
   try {
-    await Promise.race([wallet.requestPermissions(), timeoutPromise]);
-
-    const address = await wallet.getPKH();
-    const isAdmin = TEZOS_CONFIG.adminAddress
-      ? address.toLowerCase() === TEZOS_CONFIG.adminAddress.toLowerCase()
-      : true;
-
-    return { address, isAdmin };
-  } finally {
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
+    if (typeof window === 'undefined') return;
+    if (disconnected) {
+      window.localStorage.setItem(EXPLICIT_DISCONNECT_STORAGE_KEY, 'true');
+    } else {
+      window.localStorage.removeItem(EXPLICIT_DISCONNECT_STORAGE_KEY);
     }
+  } catch {
+    // Ignore storage quota or security errors in sandboxed contexts
   }
 }
 
 /**
+ * Connect to wallet using Beacon wallet selection modal.
+ * Always opens Beacon so the user can choose their wallet.
+ * Intercepts and fixes the "Use Extension" action when Temple Wallet is selected,
+ * requesting permission on Shadownet and updating connected state.
+ */
+export async function connectWallet(): Promise<{ address: string; isAdmin: boolean }> {
+  // Clear any remembered disconnected state when the user explicitly clicks Connect Wallet
+  setWalletExplicitlyDisconnected(false);
+  const wallet = getBeaconWallet();
+
+  let cleanupListeners: (() => void) | undefined;
+  let isSettled = false;
+
+  return new Promise<{ address: string; isAdmin: boolean }>((resolve, reject) => {
+    const safeResolve = (res: { address: string; isAdmin: boolean }) => {
+      if (isSettled) return;
+      isSettled = true;
+      if (cleanupListeners) cleanupListeners();
+      resolve(res);
+    };
+
+    const safeReject = (err: unknown) => {
+      if (isSettled) return;
+      isSettled = true;
+      if (cleanupListeners) cleanupListeners();
+      reject(err);
+    };
+
+    // Handler when user selects Temple Wallet in Beacon and clicks "Use Extension"
+    const handleTempleExtensionConnect = async () => {
+      try {
+        const isTempleAvailable = await TempleWallet.isAvailable().catch(() => false);
+        if (!isTempleAvailable) {
+          throw new Error(
+            'Temple Wallet extension was not detected in this browser. Please ensure it is installed and unlocked.'
+          );
+        }
+
+        const temple = new TempleWallet('D.A.R.T');
+        await temple.connect(
+          {
+            name: 'shadownet',
+            rpc: TEZOS_CONFIG.rpcUrl,
+          },
+          { forcePermission: true }
+        );
+
+        const address = await temple.getPKH();
+        getTezosToolkit().setWalletProvider(temple as any);
+        templeInstance = temple;
+        activeWalletType = 'temple';
+
+        // Close Beacon modal from the DOM
+        if (typeof document !== 'undefined') {
+          document.querySelectorAll('beacon-alert').forEach((el) => el.remove());
+        }
+
+        const isAdmin = TEZOS_CONFIG.adminAddress
+          ? address.toLowerCase() === TEZOS_CONFIG.adminAddress.toLowerCase()
+          : true;
+
+        safeResolve({ address, isAdmin });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (
+          msg.includes('NotGranted') ||
+          msg.includes('Permission not granted') ||
+          msg.includes('declined') ||
+          msg.includes('cancelled') ||
+          msg.includes('User rejected')
+        ) {
+          safeReject(new Error('Connection request was declined in Temple wallet.'));
+        } else {
+          safeReject(err);
+        }
+      }
+    };
+
+    // Attach click interceptor and UI observer for Beacon modal
+    if (typeof window !== 'undefined') {
+      const clickHandler = async (event: MouseEvent) => {
+        const path = event.composedPath ? event.composedPath() : [];
+        for (const el of path) {
+          if (el instanceof HTMLElement) {
+            const text = el.textContent?.trim().toLowerCase();
+            if (
+              text === 'use extension' ||
+              (el.tagName === 'BUTTON' && text?.includes('use extension'))
+            ) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+              await handleTempleExtensionConnect();
+              return;
+            }
+          }
+        }
+      };
+
+      const patchBeaconUI = async () => {
+        const beaconAlert = document.querySelector('beacon-alert');
+        if (!beaconAlert || !beaconAlert.shadowRoot) return;
+
+        const shadow = beaconAlert.shadowRoot;
+        const isTemple = await TempleWallet.isAvailable().catch(() => false);
+        if (!isTemple) return;
+
+        const wrappers = shadow.querySelectorAll('.info-wrapper');
+        wrappers.forEach((wrapper) => {
+          const title = wrapper.querySelector('.info-title')?.textContent?.toLowerCase() || '';
+          if (title.includes('temple')) {
+            const btn = wrapper.querySelector('button');
+            if (btn && btn.textContent?.toLowerCase().includes('install')) {
+              btn.textContent = 'Use Extension';
+            }
+            const desc = wrapper.querySelector('.info-description');
+            if (desc && desc.textContent?.toLowerCase().includes('install')) {
+              desc.textContent = 'Please connect below to use your Temple Wallet browser extension.';
+            }
+            const titleEl = wrapper.querySelector('.info-title');
+            if (titleEl && titleEl.textContent?.toLowerCase().includes('install')) {
+              titleEl.textContent = 'Connect with Temple Browser Extension';
+            }
+          }
+        });
+      };
+
+      window.addEventListener('click', clickHandler, true);
+
+      const observer = new MutationObserver(() => {
+        patchBeaconUI();
+      });
+
+      if (document.body) {
+        observer.observe(document.body, { childList: true, subtree: true });
+      }
+      patchBeaconUI();
+
+      cleanupListeners = () => {
+        window.removeEventListener('click', clickHandler, true);
+        observer.disconnect();
+      };
+    }
+
+    // Set timeout to prevent hanging forever
+    const timeoutHandle = setTimeout(() => {
+      safeReject(
+        new Error(
+          'Wallet connection request timed out. Please ensure your wallet extension is installed, unlocked, and connected to Tezos Shadownet.'
+        )
+      );
+    }, 60000);
+
+    // Call Beacon's standard requestPermissions() to show the Beacon selection modal
+    wallet
+      .requestPermissions()
+      .then(async () => {
+        clearTimeout(timeoutHandle);
+        const address = await wallet.getPKH();
+        getTezosToolkit().setWalletProvider(wallet);
+        activeWalletType = 'beacon';
+        const isAdmin = TEZOS_CONFIG.adminAddress
+          ? address.toLowerCase() === TEZOS_CONFIG.adminAddress.toLowerCase()
+          : true;
+        safeResolve({ address, isAdmin });
+      })
+      .catch((err: unknown) => {
+        clearTimeout(timeoutHandle);
+        // If Temple was connected via "Use Extension", safeResolve was already called so this is ignored
+        if (!isSettled) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (
+            msg.includes('Declined') ||
+            msg.includes('ABORTED') ||
+            msg.includes('User rejected') ||
+            msg.includes('cancelled')
+          ) {
+            safeReject(new Error('Wallet connection was declined or cancelled.'));
+          } else {
+            safeReject(err);
+          }
+        }
+      });
+  });
+}
+
+// Keep connectTempleWallet as alias for backward compatibility
+export const connectTempleWallet = connectWallet;
+
+/**
  * Disconnect active wallet session.
  */
-export async function disconnectTempleWallet(): Promise<void> {
+export async function disconnectWallet(): Promise<void> {
+  // Remember that the user explicitly chose to disconnect across reloads
+  setWalletExplicitlyDisconnected(true);
+
   if (activeWalletType === 'temple') {
     templeInstance = null;
     activeWalletType = null;
@@ -292,6 +428,8 @@ export async function disconnectTempleWallet(): Promise<void> {
   }
 }
 
+export const disconnectTempleWallet = disconnectWallet;
+
 /**
  * Check existing active account without triggering permissions popup.
  */
@@ -299,12 +437,17 @@ export async function checkActiveWalletAccount(): Promise<{
   address: string | null;
   isAdmin: boolean;
 }> {
+  // If the user explicitly disconnected, do not automatically restore the previous session
+  if (isWalletExplicitlyDisconnected()) {
+    return { address: null, isAdmin: false };
+  }
+
   try {
     const isTempleAvailable = await TempleWallet.isAvailable();
     if (isTempleAvailable) {
       const currentPerm = await TempleWallet.getCurrentPermission();
       if (currentPerm && currentPerm.pkh) {
-        const temple = new TempleWallet('Document Integrity Registry', currentPerm);
+        const temple = new TempleWallet('D.A.R.T', currentPerm);
         getTezosToolkit().setWalletProvider(temple as any);
         templeInstance = temple;
         activeWalletType = 'temple';
@@ -365,7 +508,7 @@ export async function registerDocumentOnChain(
   if (!activeAddress) {
     return {
       step: 'FAILED',
-      errorMessage: 'Wallet not connected. Please connect your Temple wallet on Tezos Shadownet.',
+      errorMessage: 'Wallet not connected. Please connect your wallet on Tezos Shadownet.',
     };
   }
 
@@ -440,7 +583,7 @@ export async function registerDocumentOnChain(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
 
-    // User rejected the signature request in Temple
+    // User rejected the signature request in wallet
     if (
       message.includes('Declined') ||
       message.includes('ABORTED') ||
@@ -449,7 +592,7 @@ export async function registerDocumentOnChain(
     ) {
       return {
         step: 'REJECTED',
-        errorMessage: 'Transaction was declined in Temple wallet.',
+        errorMessage: 'Transaction was declined in wallet.',
       };
     }
 

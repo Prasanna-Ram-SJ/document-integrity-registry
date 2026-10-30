@@ -3,6 +3,7 @@ import { TEZOS_CONFIG, isContractConfigured } from '../config/tezos';
 import { isSupabaseConfigured } from '../config/supabase';
 import {
   insertDocumentToCatalog,
+  checkLabelAvailability,
   getCurrentSupabaseUser,
   signInRegistrar,
   signOutRegistrar,
@@ -20,6 +21,7 @@ import { WalletState, RegistrationOutcome } from '../types/registry';
 interface RegisterSectionProps {
   walletState: WalletState;
   onConnectWallet: () => Promise<void>;
+  onNavigateRegister?: () => void;
 }
 
 type CatalogueSyncState =
@@ -32,6 +34,7 @@ type CatalogueSyncState =
 export const RegisterSection: React.FC<RegisterSectionProps> = ({
   walletState,
   onConnectWallet,
+  onNavigateRegister,
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [computedSha256, setComputedSha256] = useState<string>('');
@@ -44,7 +47,11 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
   // Registration execution states
   const [outcome, setOutcome] = useState<RegistrationOutcome | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [isCheckingLabel, setIsCheckingLabel] = useState<boolean>(false);
+  const [registeredSnapshot, setRegisteredSnapshot] = useState<{
+    fileName: string;
+    label: string;
+  } | null>(null);
 
   // Supabase catalogue sync states
   const [catalogueState, setCatalogueState] = useState<CatalogueSyncState>({ status: 'IDLE' });
@@ -55,6 +62,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
   const [loginPassword, setLoginPassword] = useState<string>('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -69,6 +77,18 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
         .catch(() => setSupabaseUser(null));
     }
   }, [supabaseConfigured]);
+
+  // Derived requirement statuses
+  const isWalletConnected = walletState.connected && !!walletState.address;
+  const isCatalogueSignedIn = !supabaseConfigured || !!supabaseUser;
+  const missingRequirement: 'wallet' | 'catalogue' | 'both' | null =
+    !isWalletConnected && !isCatalogueSignedIn
+      ? 'both'
+      : !isWalletConnected
+      ? 'wallet'
+      : !isCatalogueSignedIn
+      ? 'catalogue'
+      : null;
 
   const syncToCatalogue = async (recId: string, lbl: string) => {
     if (!supabaseConfigured) {
@@ -234,17 +254,53 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
     }
   };
 
-  const handleCopyText = async (text: string, fieldName: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopiedField(fieldName);
-    setTimeout(() => setCopiedField(null), 2000);
+  // Notice Action: Navigate to Registrar Login destination
+  const handleNoticeRegistrarLogin = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShowLoginForm(true);
+    if (onNavigateRegister) {
+      onNavigateRegister();
+    } else {
+      const targetEl = document.getElementById('register');
+      if (targetEl) {
+        const header = document.querySelector('.site-header');
+        const headerHeight = header ? header.getBoundingClientRect().height : 68;
+        const extraSpacing = 20;
+        const elementRect = targetEl.getBoundingClientRect();
+        const targetY = window.scrollY + elementRect.top - headerHeight - extraSpacing;
+        window.scrollTo({
+          top: Math.max(0, targetY),
+          left: 0,
+          behavior: 'smooth',
+        });
+      }
+    }
+    // Gently focus the registrar email field once visible
+    setTimeout(() => {
+      const emailInput = document.querySelector<HTMLInputElement>('input[placeholder="Registrar email"]');
+      if (emailInput) {
+        emailInput.focus();
+      }
+    }, 150);
   };
 
   // Explicit Register Submission
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const labelValidation = validateLabel(label);
+    // Prevent repeated submissions while registration or check is running
+    if (isSubmitting || isCheckingLabel) {
+      return;
+    }
+
+    const cleanLabel = label.trim();
+    if (!cleanLabel) {
+      setLabelError('Document label cannot be empty.');
+      return;
+    }
+
+    const labelValidation = validateLabel(cleanLabel);
     if (!labelValidation.valid) {
       setLabelError(labelValidation.error || 'Invalid label.');
       return;
@@ -262,10 +318,55 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
       return;
     }
 
-    if (!walletState.connected) {
-      await onConnectWallet();
+    // Check Registration Requirements:
+    // 1) Connected to a Tezos wallet
+    // 2) Signed in to Supabase catalogue (if Supabase is configured)
+    if (!isWalletConnected || !isCatalogueSignedIn) {
+      setHasAttemptedSubmit(true);
       return;
     }
+
+    setHasAttemptedSubmit(false);
+
+    // Pre-flight check: Verify label availability in catalogue before asking for wallet signature
+    if (supabaseConfigured) {
+      setIsCheckingLabel(true);
+      setLabelError(null);
+      try {
+        const availability = await checkLabelAvailability(cleanLabel);
+        if (!availability.available) {
+          if (availability.isDuplicate) {
+            const dupMsg = 'This label is already registered. Please choose a different label.';
+            setLabelError(dupMsg);
+            setOutcome({
+              step: 'FAILED',
+              errorMessage: dupMsg,
+            });
+          } else {
+            const checkErr = availability.error || 'Failed to verify label availability.';
+            setLabelError(checkErr);
+            setOutcome({
+              step: 'FAILED',
+              errorMessage: `Could not verify label availability: ${checkErr}. Registration was stopped to prevent duplicate labels.`,
+            });
+          }
+          return;
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setLabelError(`Label check failed: ${msg}`);
+        setOutcome({
+          step: 'FAILED',
+          errorMessage: `Could not verify label availability: ${msg}. Registration was stopped to prevent duplicate labels.`,
+        });
+        return;
+      } finally {
+        setIsCheckingLabel(false);
+      }
+    }
+
+    const registeredFileName = file.name;
+    const registeredLabelText = cleanLabel;
 
     setIsSubmitting(true);
     setOutcome({ step: 'AWAITING_APPROVAL' });
@@ -274,14 +375,18 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
     try {
       const res = await registerDocumentOnChain({
         record_id: recordId,
-        label: label.trim(),
+        label: cleanLabel,
         sha256: computedSha256,
       });
       setOutcome(res);
 
       if (res.step === 'CONFIRMED') {
+        setRegisteredSnapshot({
+          fileName: registeredFileName,
+          label: registeredLabelText,
+        });
         // Blockchain registration succeeded: now sync to Supabase document catalogue
-        await syncToCatalogue(recordId, label.trim());
+        await syncToCatalogue(recordId, cleanLabel);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -298,7 +403,9 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
     file !== null &&
     computedSha256.length === 64 &&
     label.trim().length > 0 &&
-    !labelError;
+    !labelError &&
+    !isCheckingLabel &&
+    !isSubmitting;
 
   return (
     <div className="panel-card" id="register">
@@ -330,8 +437,8 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
           gap: '8px',
           padding: '8px 12px',
           marginBottom: '16px',
-          backgroundColor: '#f8fafc',
-          border: '1px solid #e2e8f0',
+          backgroundColor: 'var(--dp-color-neutral-bg)',
+          border: '1px solid var(--dp-color-rule)',
           borderRadius: '8px',
           fontSize: '13px'
         }}>
@@ -376,10 +483,10 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
         <form onSubmit={handleSupabaseLogin} style={{
           padding: '16px',
           marginBottom: '16px',
-          backgroundColor: '#ffffff',
+          backgroundColor: 'var(--dp-color-panel)',
           border: '1px solid var(--dp-color-accent)',
           borderRadius: '8px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
         }}>
           <h4 style={{ fontSize: '14px', marginBottom: '8px' }}>Sign In as Authorized Registrar (Supabase)</h4>
           <p style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)', marginBottom: '12px' }}>
@@ -438,7 +545,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
             <line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
           <div>
-            <strong>Contract not configured:</strong> The registry contract has not yet been deployed to Tezos Shadownet. Real-chain registration is disabled until <code>VITE_DOCUMENT_REGISTRY_ADDRESS</code> is provided.
+            <strong>Contract not configured:</strong> The D.A.R.T contract has not yet been deployed to Tezos Shadownet. Real-chain registration is disabled until <code>VITE_DOCUMENT_REGISTRY_ADDRESS</code> is provided.
           </div>
         </div>
       )}
@@ -471,7 +578,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
         </div>
       )}
 
-      <form onSubmit={handleRegister} noValidate>
+      <form id="register-form" onSubmit={handleRegister} noValidate>
         {/* File Picker */}
         <div className="form-group">
           <label className="form-label" htmlFor="register-file-input">
@@ -626,10 +733,10 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
 
         {/* Status Announcements (Accessible Live Region) */}
         <div aria-live="polite" className="sr-only">
-          {outcome?.step === 'AWAITING_APPROVAL' && 'Awaiting Temple wallet approval.'}
+          {outcome?.step === 'AWAITING_APPROVAL' && 'Awaiting wallet approval.'}
           {outcome?.step === 'PENDING_CONFIRMATION' && 'Waiting for Tezos Shadownet confirmation.'}
           {outcome?.step === 'CONFIRMED' && 'Document version successfully registered on Tezos Shadownet.'}
-          {outcome?.step === 'REJECTED' && 'Transaction declined in Temple wallet.'}
+          {outcome?.step === 'REJECTED' && 'Transaction declined in wallet.'}
           {outcome?.step === 'UNAUTHORIZED' && 'Registration unauthorized: only the configured admin may register.'}
           {outcome?.step === 'DUPLICATE_ID' && 'A document with this record ID already exists.'}
           {outcome?.step === 'FAILED' && `Registration failed: ${outcome.errorMessage}`}
@@ -643,7 +750,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
               <polyline points="12 6 12 12 16 14"/>
             </svg>
             <div>
-              <strong>Awaiting Temple approval:</strong> Please review and approve the transaction in your Temple wallet extension.
+              <strong>Awaiting wallet approval:</strong> Please review and approve the transaction in your connected wallet.
             </div>
           </div>
         )}
@@ -663,13 +770,22 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px' }}>
-                <div className="preview-value-group">
-                  <span style={{ fontWeight: 600, width: '90px', fontSize: '12px' }}>Document:</span>
-                  <span style={{ fontWeight: 600 }}>{outcome.label || label}</span>
+                <div className="preview-value-group" style={{ alignItems: 'flex-start' }}>
+                  <span style={{ fontWeight: 600, width: '90px', minWidth: '90px', fontSize: '12px', flexShrink: 0 }}>Document:</span>
+                  <span style={{ fontWeight: 600, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                    {registeredSnapshot?.fileName || file?.name || 'Document'}
+                  </span>
+                </div>
+
+                <div className="preview-value-group" style={{ alignItems: 'flex-start' }}>
+                  <span style={{ fontWeight: 600, width: '90px', minWidth: '90px', fontSize: '12px', flexShrink: 0 }}>Label:</span>
+                  <span style={{ fontWeight: 600, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                    {registeredSnapshot?.label || outcome.label || label}
+                  </span>
                 </div>
 
                 <div className="preview-value-group">
-                  <span style={{ fontWeight: 600, width: '90px', fontSize: '12px' }}>Record ID:</span>
+                  <span style={{ fontWeight: 600, width: '90px', minWidth: '90px', fontSize: '12px', flexShrink: 0 }}>Record ID:</span>
                   <code className="masked-value">•••••••• 🔒</code>
                   <span style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)' }}>
                     (Visual mask)
@@ -677,77 +793,85 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
                 </div>
 
                 <div className="preview-value-group">
-                  <span style={{ fontWeight: 600, width: '90px', fontSize: '12px' }}>Fingerprint:</span>
+                  <span style={{ fontWeight: 600, width: '90px', minWidth: '90px', fontSize: '12px', flexShrink: 0 }}>Fingerprint:</span>
                   <code className="masked-value">•••••••• 🔒</code>
                   <span style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)' }}>
                     (Visual mask)
                   </span>
                 </div>
 
-                {outcome.txHash && (
-                  <div className="preview-value-group">
-                    <span style={{ fontWeight: 600, width: '90px', fontSize: '12px' }}>Tx Hash:</span>
-                    <code className="preview-value">{outcome.txHash}</code>
-                    <button
-                      type="button"
-                      onClick={() => handleCopyText(outcome.txHash!, 'confirmed-tx')}
-                      className="copy-btn"
+                {outcome.step === 'CONFIRMED' && outcome.txHash && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      gap: '10px',
+                      marginTop: '6px',
+                    }}
+                  >
+                    <a
+                      href={`https://shadownet.tzkt.io/${outcome.txHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-secondary btn-small"
+                      style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                     >
-                      {copiedField === 'confirmed-tx' ? 'Copied' : 'Copy Tx'}
-                    </button>
+                      <span>View on Tezos Explorer</span>
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                        <polyline points="15 3 21 3 21 9" />
+                        <line x1="10" y1="14" x2="21" y2="3" />
+                      </svg>
+                    </a>
+                    <span style={{ fontSize: '12px', color: 'var(--dp-color-ink-secondary)' }}>
+                      Inspect this registration’s confirmed transaction on Shadownet.
+                    </span>
                   </div>
                 )}
               </div>
 
-              {/* Visual Masking Educational Notice */}
-              <div className="mask-notice" style={{ marginTop: '10px' }} role="note">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                </svg>
-                <div>
-                  <strong>Visual masking note (<code>•••••••• 🔒</code>):</strong> Record IDs and fingerprints are visually masked on this screen. This visual masking does not make on-chain data private: all data stored on Tezos Shadownet can still be inspected outside this app using an RPC node or block explorer.
-                </div>
-              </div>
+
 
               {/* Supabase Document Catalogue Sync State */}
               {catalogueState.status === 'SAVING' && (
-                <div style={{
+                <div className="catalogue-sync-saving" style={{
                   marginTop: '12px',
                   padding: '10px 12px',
-                  backgroundColor: '#f0f9ff',
                   borderRadius: '8px',
-                  border: '1px solid #bae6fd',
                   fontSize: '13px',
-                  color: '#0369a1'
                 }}>
                   Syncing document label to Supabase search catalogue...
                 </div>
               )}
 
               {catalogueState.status === 'SUCCESS' && (
-                <div style={{
+                <div className="catalogue-sync-success" style={{
                   marginTop: '12px',
                   padding: '10px 12px',
-                  backgroundColor: '#f0fdf4',
                   borderRadius: '8px',
-                  border: '1px solid #bbf7d0',
                   fontSize: '13px',
-                  color: '#15803d'
                 }}>
                   ✓ <strong>Added to Document Catalogue:</strong> Users can now find and verify this document by searching for "<strong>{outcome.label || label}</strong>" without needing the raw Record ID.
                 </div>
               )}
 
               {catalogueState.status === 'NOT_CONFIGURED' && (
-                <div style={{
+                <div className="catalogue-sync-neutral" style={{
                   marginTop: '12px',
                   padding: '10px 12px',
-                  backgroundColor: '#f8fafc',
                   borderRadius: '8px',
-                  border: '1px solid #e2e8f0',
                   fontSize: '13px',
-                  color: 'var(--dp-color-ink-secondary)'
                 }}>
                   ℹ️ <strong>Supabase Catalogue Not Configured:</strong> The document is securely registered on Tezos Shadownet. To enable label-based search, configure <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_PUBLISHABLE_KEY</code>.
                 </div>
@@ -772,7 +896,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
                     </div>
 
                     {catalogueState.isRlsError && !supabaseUser && (
-                      <div style={{ marginBottom: '10px', padding: '8px 10px', background: '#fff', borderRadius: '6px', border: '1px solid #fde68a' }}>
+                      <div style={{ marginBottom: '10px', padding: '8px 10px', background: 'var(--dp-color-neutral-bg)', borderRadius: '6px', border: '1px solid var(--dp-color-warning)' }}>
                         <p style={{ fontSize: '12px', marginBottom: '6px' }}>
                           Row Level Security requires you to sign in as the authorized registrar before saving to the catalogue:
                         </p>
@@ -814,7 +938,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
               <line x1="9" y1="9" x2="15" y2="15"/>
             </svg>
             <div>
-              <strong>Transaction Rejected:</strong> {outcome.errorMessage || 'Operation declined in Temple wallet.'}
+              <strong>Transaction Rejected:</strong> {outcome.errorMessage || 'Operation declined in wallet.'}
             </div>
           </div>
         )}
@@ -857,35 +981,81 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
             </div>
           </div>
         )}
-
-        {/* Action Button */}
-        <div style={{ marginTop: '24px' }}>
-          {!walletState.connected ? (
-            <button
-              type="button"
-              onClick={onConnectWallet}
-              disabled={walletState.isConnecting}
-              className="btn btn-primary"
-              style={{ width: '100%' }}
-            >
-              {walletState.isConnecting ? 'Connecting Temple...' : 'Connect Temple Wallet to Register'}
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!isFormValid || !contractConfigured || isSubmitting}
-              className="btn btn-primary"
-              style={{ width: '100%' }}
-            >
-              {isSubmitting
-                ? 'Registering on Shadownet...'
-                : !contractConfigured
-                ? 'Contract Not Configured'
-                : 'Register Document on Shadownet'}
-            </button>
-          )}
-        </div>
       </form>
+
+      {/* Registration Requirements Notice (rendered outside form to prevent accidental submission) */}
+      {hasAttemptedSubmit && missingRequirement && (
+        <div className="state-box state-box-warning" role="alert" style={{ marginTop: '20px' }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <div style={{ width: '100%' }}>
+            <div style={{ fontWeight: 700, marginBottom: '4px' }}>
+              {missingRequirement === 'both'
+                ? 'Registration Requirements Needed'
+                : missingRequirement === 'wallet'
+                ? 'Wallet Connection Required'
+                : 'Catalogue Sign-In Required'}
+            </div>
+            <div style={{ fontSize: '13px', marginBottom: '10px' }}>
+              {walletState.error && !walletState.connected ? (
+                <span style={{ color: 'var(--dp-color-danger)' }}>
+                  <strong>Connection Error:</strong> {walletState.error}
+                </span>
+              ) : missingRequirement === 'both' ? (
+                'Please connect your Tezos wallet and sign in to the document catalogue before registering.'
+              ) : missingRequirement === 'wallet' ? (
+                'Please connect your Tezos wallet before registering.'
+              ) : (
+                'Please sign in to the document catalogue as an authorized registrar before registering.'
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {(missingRequirement === 'both' || missingRequirement === 'wallet') && (
+                <button
+                  type="button"
+                  onClick={onConnectWallet}
+                  disabled={walletState.isConnecting}
+                  className="btn btn-primary btn-small"
+                  aria-label="Connect wallet"
+                >
+                  {walletState.isConnecting ? 'Connecting...' : 'Connect Wallet'}
+                </button>
+              )}
+              {(missingRequirement === 'both' || missingRequirement === 'catalogue') && (
+                <button
+                  type="button"
+                  onClick={handleNoticeRegistrarLogin}
+                  className="btn btn-secondary btn-small"
+                >
+                  Registrar Login
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Action Button */}
+      <div style={{ marginTop: '24px' }}>
+        <button
+          form="register-form"
+          type="submit"
+          disabled={!isFormValid || !contractConfigured || isSubmitting || isCheckingLabel}
+          className="btn btn-primary"
+          style={{ width: '100%' }}
+        >
+          {isCheckingLabel
+            ? 'Checking label availability...'
+            : isSubmitting
+            ? 'Registering on Shadownet...'
+            : !contractConfigured
+            ? 'Contract Not Configured'
+            : 'Register Document on Shadownet'}
+        </button>
+      </div>
     </div>
   );
 };

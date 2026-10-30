@@ -2,11 +2,12 @@ import React from 'react';
 
 export const HowItWorks: React.FC = () => {
   return (
-    <section className="process-section" id="how-it-works" aria-labelledby="process-title">
+    <section className="process-section" id="about" aria-labelledby="process-title">
+      <div id="how-it-works" style={{ position: 'relative', top: '-84px', visibility: 'hidden' }} />
       <div className="container">
         <div style={{ textAlign: 'center', maxWidth: '680px', margin: '0 auto' }}>
           <h2 id="process-title" style={{ fontSize: '32px', marginBottom: '12px' }}>
-            How Document Integrity Verification Works
+            About
           </h2>
           <p style={{ fontSize: 'var(--dp-typography-body)' }}>
             A lightweight, cryptographically rigorous workflow designed for student clubs, research groups, and project teams.

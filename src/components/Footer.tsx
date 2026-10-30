@@ -1,22 +1,20 @@
 import React from 'react';
-import { TEZOS_CONFIG, isContractConfigured } from '../config/tezos';
+import { TEZOS_CONFIG } from '../config/tezos';
 
 export const Footer: React.FC = () => {
-  const contractConfigured = isContractConfigured();
-
   return (
     <footer className="site-footer" role="contentinfo">
       <div className="container">
         <div className="footer-top">
           <div>
-            <div className="footer-brand-title">Document Integrity Registry</div>
+            <div className="footer-brand-title">D.A.R.T</div>
             <p className="footer-desc">
-              Decentralized, browser-local document fingerprint registration and verification on Tezos Shadownet. Built for student clubs and project teams.
+              Decentralized Authentication and Record Tracking (D.A.R.T) on Tezos Shadownet. Built for student clubs and project teams.
             </p>
           </div>
 
           <div>
-            <div className="footer-col-title">Network &amp; Contract</div>
+            <div className="footer-col-title">Network</div>
             <ul className="footer-list">
               <li>
                 Network:{' '}
@@ -29,18 +27,6 @@ export const Footer: React.FC = () => {
                 <span style={{ color: '#ffffff', fontFamily: 'var(--dp-font-mono)', fontSize: '12px' }}>
                   {TEZOS_CONFIG.rpcUrl}
                 </span>
-              </li>
-              <li>
-                Contract:{' '}
-                {contractConfigured ? (
-                  <span style={{ color: '#ffffff', fontFamily: 'var(--dp-font-mono)' }}>
-                    {TEZOS_CONFIG.contractAddress.slice(0, 8)}...{TEZOS_CONFIG.contractAddress.slice(-4)}
-                  </span>
-                ) : (
-                  <span style={{ color: '#f3b4b4', fontStyle: 'italic' }}>
-                    Not configured (KT1 pending)
-                  </span>
-                )}
               </li>
             </ul>
           </div>
@@ -61,7 +47,7 @@ export const Footer: React.FC = () => {
             Targeting Tezos Shadownet testnet. No documents or sensitive secrets leave your browser.
           </div>
           <div>
-            {new Date().getFullYear()} Document Integrity Registry
+            {new Date().getFullYear()} D.A.R.T (Decentralized Authentication and Record Tracking)
           </div>
         </div>
       </div>

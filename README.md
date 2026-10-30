@@ -1,190 +1,187 @@
-# Document Integrity Registry
+# D.A.R.T – Decentralized Authentication and Record Tracking
 
-[![Tezos Network](https://img.shields.io/badge/Tezos-Shadownet-blue.svg)](https://teztnets.com/shadownet-about)
+[![Tezos Network](https://img.shields.io/badge/Tezos-Shadownet-5B3DF5.svg)](https://teztnets.com/shadownet-about)
 [![SmartPy](https://img.shields.io/badge/Contract-SmartPy-orange.svg)](https://smartpy.io)
 [![Taquito](https://img.shields.io/badge/Taquito-v20-purple.svg)](https://tezostaquito.io)
-[![Vite](https://img.shields.io/badge/Build-Vite%20%2B%20React-646CFF.svg)](https://vitejs.dev)
-[![Tests](https://img.shields.io/badge/Tests-20%20passing-brightgreen.svg)]()
+[![Beacon Wallet](https://img.shields.io/badge/Wallet-Beacon%20%2F%20Temple-5B3DF5.svg)](https://walletbeacon.io)
+[![Supabase](https://img.shields.io/badge/Catalogue-Supabase-3ECF8E.svg)](https://supabase.com)
+[![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg)](https://www.typescriptlang.org)
+[![Build](https://img.shields.io/badge/Build-Vite%20%2B%20React-646CFF.svg)](https://vitejs.dev)
+[![Tests](https://img.shields.io/badge/Tests-50%20passing-brightgreen.svg)]()
 
-A decentralized, privacy-first web application designed for student clubs, research groups, and project teams. It allows an authorized team administrator to record a document's SHA-256 cryptographic fingerprint and label on the **Tezos Shadownet** testnet. Later, anyone holding a copy of the document can select it in their browser and enter the assigned **Record ID** to verify whether its byte content matches the registered version.
+> **Decentralized document integrity registry for student clubs, research groups, and project teams.**  
+> Verify document revisions and establish immutable cryptographic proof on Tezos Shadownet without uploading files or exposing private data.
 
 ---
 
 ## Table of Contents
 
-- [Overview & Core Principles](#overview--core-principles)
+- [Overview & Core Guarantees](#overview--core-guarantees)
+- [Key Features](#key-features)
 - [How It Works](#how-it-works)
-  - [Cryptographic Flowchart](#cryptographic-flowchart)
-- [System Architecture](#system-architecture)
-  - [Smart Contract Specification](#smart-contract-specification)
-  - [On-Chain Configuration](#on-chain-configuration)
-- [User Workflows](#user-workflows)
-  - [1. Document Registration](#1-document-registration)
-  - [2. Document Verification](#2-document-verification)
+  - [Cryptographic Architecture Flow](#cryptographic-architecture-flow)
 - [Verification Outcomes](#verification-outcomes)
-- [Important Limits & Non-Goals](#important-limits--non-goals)
+- [Technical Architecture](#technical-architecture)
+  - [Smart Contract Specification](#smart-contract-specification)
+  - [Tezos & Beacon Wallet Flow](#tezos--beacon-wallet-flow)
+  - [Supabase Catalogue Integration](#supabase-catalogue-integration)
+  - [Visual System & Dark Mode](#visual-system--dark-mode)
+- [Security & Trust Boundaries](#security--trust-boundaries)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
-  - [Environment Configuration](#environment-configuration)
-  - [Running the Website](#running-the-website)
-  - [Running Tests & Type Checking](#running-tests--type-checking)
-- [Deep Dive & Technical Details](#deep-dive--technical-details)
-  - [Browser-Side Cryptography](#browser-side-cryptography)
-  - [Dual Wallet Integration & Polyfills](#dual-wallet-integration--polyfills)
-  - [SmartPy Contract Code & Compilation](#smartpy-contract-code--compilation)
-- [Troubleshooting & FAQ](#troubleshooting--faq)
+  - [Configuration](#configuration)
+  - [Development Server](#development-server)
+  - [Testing & Quality Assurance](#testing--quality-assurance)
+  - [Production Build](#production-build)
 - [Repository Structure](#repository-structure)
 - [License](#license)
 
 ---
 
-<a id="overview--core-principles"></a>
-## Overview & Core Principles
+## Overview & Core Guarantees
 
-When teams share bylaws, contest submissions, project charters, whitepapers, or code deliverables, team members often need to know whether a circulating PDF or archive is identical to the authoritative revision.
+When student organizations and project teams distribute bylaws, contest entries, whitepapers, financial statements, or code archives, team members and evaluators frequently need to confirm that a circulating copy matches the authoritative version approved by the leadership.
 
-The **Document Integrity Registry** solves this problem with three core guarantees:
+**D.A.R.T** addresses this challenge with five core architectural guarantees:
 
-1. **Zero File Uploads (Complete Privacy)**: The selected file never leaves your browser. Files are read locally using the browser's native `File` API and hashed in memory using the W3C standard `crypto.subtle.digest('SHA-256')`. File bytes are never uploaded, persisted, cached, or transmitted to any server or blockchain.
-2. **Authoritative On-Chain Anchor**: Only the 64-character lowercase hexadecimal fingerprint, a short label, the unique UUID Record ID, the registrar's public address, and the registration timestamp are stored in the smart contract's `big_map` on Tezos Shadownet.
-3. **Wallet-Free Verification**: Checking a document is completely read-only. Anyone can verify a file in seconds without connecting a wallet, installing an extension, holding test tez, or signing transactions.
+1. **100% Client-Side Privacy (Zero File Uploads)**  
+   The selected document never leaves the user's browser. Files are read locally via the HTML5 File API and digested in memory with the W3C Web Crypto API (`crypto.subtle.digest('SHA-256')`). No file bytes are ever uploaded, cached, or transmitted to any server, IPFS node, or blockchain.
+2. **Authoritative On-Chain Anchor**  
+   Only the 64-character lowercase hexadecimal SHA-256 fingerprint, a human-readable document label, an auto-generated UUID v4 Record ID, the registrar's address, and the on-chain timestamp are committed to the SmartPy smart contract storage on **Tezos Shadownet**.
+3. **Wallet-Free Public Verification**  
+   Checking a document is completely read-only and publicly accessible. Anyone can inspect and verify a file in seconds without connecting a wallet, installing a browser extension, holding testnet tez, or paying transaction fees.
+4. **Convenient Label-Based Discovery**  
+   Users can look up documents by searching their familiar label (with live autocomplete, masked sensitive identifiers, and duplicate warnings), eliminating the need to memorize or paste raw UUID record strings.
+5. **Decentralized Access Enforcement**  
+   Document registration is strictly restricted on-chain to the smart contract's configured administrator wallet address.
+
+---
+
+## Key Features
+
+- **Standardized Wallet Flow**: Universal "Connect Wallet" flow powered by Beacon and Taquito, allowing users to select Temple or any supported Tezos wallet with "Use Extension" pairing.
+- **Persistent Session Control**: Explicit wallet disconnect choices persist across page reloads so browser extensions do not auto-reconnect without user interaction.
+- **Reload-to-Top Navigation**: True page reloads (Ctrl+R / browser refresh) return to the top of the page while maintaining standard scroll restoration for browser Back/Forward and anchor links.
+- **Radial View Transitions Dark Mode**: Seamless toggle between a crisp Light Mode and an elegant Dark Mode featuring an expanding circular radial reveal via the View Transitions API, with smooth fallback and `prefers-reduced-motion` compliance.
+- **Refined Micro-Interactions**: Visual navbar hover enlargement (3.5%) animating text labels and brand icons without causing layout shifts.
+- **Registration Requirements Assistant**: Automatic prerequisite verification before transaction submission, displaying clear, actionable buttons if wallet connection or catalogue sign-in is required.
+- **Confirmed Transaction Explorer Link**: Verified document registrations provide a direct external link to the TzKT Shadownet Block Explorer (`https://shadownet.tzkt.io/{TX_HASH}`) for independent on-chain audit.
 
 ---
 
 ## How It Works
 
-### Cryptographic Flowchart
+### Cryptographic Architecture Flow
 
 ```mermaid
 flowchart TD
-    subgraph Registration ["1. Registration (Authorized Registrar)"]
-        A["Select Local File\n(PDF, DOCX, ZIP, etc.)"] --> B["Compute SHA-256 Locally\n(Web Crypto API)"]
-        B --> C["Generate UUID v4 Record ID\n& Enter Short Label"]
-        C --> D["Connect Temple Wallet\n(Tezos Shadownet)"]
-        D --> E["Submit 'register' Transaction\n(Admin-Restricted Entrypoint)"]
-        E --> F[("Tezos Shadownet Big_Map\n(Contract Storage)")]
+    subgraph Registration ["1. Registration (Authorized Registrar Admin)"]
+        A["Select Local Document\n(PDF, DOCX, ZIP, etc.)"] --> B["Compute SHA-256 in Browser\n(Web Crypto API)"]
+        B --> C["Auto-Generate UUID Record ID\n& Enter Label"]
+        C --> D["Connect Tezos Wallet\n(Beacon / Temple on Shadownet)"]
+        D --> E["Review & Sign Transaction\n(Admin-Restricted 'register' Entrypoint)"]
+        E --> F[("Tezos Shadownet Big_Map\n(Permanent On-Chain Storage)")]
+        E -. Sync Label .-> G[("Supabase Catalogue\n(Searchable Label Index)")]
     end
 
     subgraph Verification ["2. Verification (Public & Read-Only)"]
-        G["Select Local Copy\nto Check"] --> H["Compute SHA-256 Locally\n(Web Crypto API)"]
-        I["Enter Record ID (UUID)"] --> J["Call 'get_record' View\n(RPC View Query — No Wallet Required)"]
-        F -. Read View .-> J
-        H --> K{"Compare Fingerprints"}
-        J --> K
-        K -->|"Hashes Match"| L["✅ MATCH\nFile matches registered bytes"]
-        K -->|"Hashes Differ"| M["⚠️ MISMATCH\nFile differs from registered version"]
-        K -->|"ID Not Found"| N["❓ RECORD NOT FOUND\nNo record exists for this Record ID"]
+        H["Select Local Copy to Check"] --> I["Compute SHA-256 in Browser\n(Web Crypto API)"]
+        J["Search by Label or Enter Record ID"] --> K["Call 'get_record' View via RPC\n(Zero Gas • No Wallet Needed)"]
+        F -. Query View .-> K
+        I --> L{"Cryptographic\nDigest Comparison"}
+        K --> L
+        L -->|"Hashes Match"| M["🟢 MATCH\nSelected file matches registered version"]
+        L -->|"Hashes Differ"| N["🟠 MISMATCH\nSelected file differs from registered version"]
+        L -->|"Unknown Record"| O["⚪ RECORD NOT FOUND\nNo record found for this ID"]
     end
 ```
-
----
-
-## System Architecture
-
-The application consists of a single-page React client talking directly to the Tezos Shadownet RPC and the deployed SmartPy contract.
-
-```
-┌────────────────────────────────────────────────────────┐
-│                   Browser Client                       │
-│                                                        │
-│  React 18 + Vite UI    ──▶    Web Crypto API (SHA-256) │
-│           │                                            │
-│           ▼                                            │
-│  tezosAdapter.ts       ──▶    Taquito / Beacon / Temple│
-└───────────┬────────────────────────────────────────────┘
-            │
-            │ Direct RPC (HTTPS)
-            ▼
-┌────────────────────────────────────────────────────────┐
-│              Tezos Shadownet Testnet                   │
-│                                                        │
-│  SmartPy Document Registry Contract                    │
-│  - Entrypoint: register(record_id, label, sha256)      │
-│  - On-Chain View: get_record(record_id)                │
-└────────────────────────────────────────────────────────┘
-```
-
-### Smart Contract Specification
-
-The contract is written in [SmartPy](https://smartpy.io) and originated to Tezos Shadownet:
-
-- **Source Code**: [`contracts/document_registry.py`](contracts/document_registry.py)
-- **Contract Address**: Set this value locally; do not put it in the README.
-- **Configured Registrar Admin**: Set this value locally; do not put it in the README.
-- **Write Entrypoint**: `register(params: record(record_id: string, label: string, sha256: string))`
-  - Restricts execution strictly to `sp.sender == self.data.admin`.
-  - Prevents record collisions (`assert not (params.record_id in self.data.records)`).
-  - Persists `{ label, sha256, registrar, registered_at }`.
-- **Read-Only On-Chain View**: `get_record(record_id: string) -> sp.option[record_type]`
-  - Queries `self.data.records.get_opt(record_id)`.
-  - Returns `Some(record)` when the record exists, or `None` if unknown.
-
-### On-Chain Configuration
-
-Configuration settings are centralized in [`src/config/tezos.ts`](src/config/tezos.ts) and populated via environment variables:
-
-| Setting | Variable Name | Configuration Value |
-| :--- | :--- | :--- |
-| **Network** | `VITE_TEZOS_NETWORK` | /* Private Data */ |
-| **RPC URL** | `VITE_TEZOS_RPC_URL` | /* Private Data */ |
-| **Contract Address** | `VITE_DOCUMENT_REGISTRY_ADDRESS` | /* Private Data */ |
-| **Admin Address** | `VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS` | /* Private Data */ |
-
----
-
-## User Workflows
-
-### 1. Document Registration
-
-Registration allows authorized team leads or registrars to record a document's fingerprint:
-
-1. **Select Document**: Pick any local file via file picker or drag-and-drop.
-2. **Local Fingerprint**: The browser immediately calculates the 64-character SHA-256 fingerprint.
-3. **Auto-Generated Record ID**: A standard UUID v4 (e.g., `4fa9c680-e387-4340-a337-128a30ef1d2f`) is created automatically.
-4. **Enter Label**: Enter a short label describing the document (up to 100 printable ASCII characters, e.g., `Club Constitution v2.1`).
-5. **Connect Temple Wallet**: Connect Temple wallet configured to **Tezos Shadownet**. The UI verifies that your connected account matches the configured on-chain registrar admin address.
-6. **Sign Transaction**: Click **Register on Tezos Shadownet**. Temple wallet prompts you to approve the `register` invocation.
-7. **Confirmation & Receipt**: Once confirmed on-chain (1 block confirmation), the confirmed Record ID, fingerprint, transaction hash, registrar address, and timestamp are displayed with convenient copy buttons.
-
-### 2. Document Verification
-
-Verification enables anyone to verify whether a given document matches a registered version:
-
-1. **Select File to Verify**: Choose the document file to test.
-2. **Enter Record ID**: Paste the UUID Record ID received from the team.
-3. **Instant Verification**: Click **Verify Document**.
-4. The application computes the file's SHA-256 digest locally, queries the contract's `get_record` view via RPC, and compares the two digests.
 
 ---
 
 ## Verification Outcomes
 
-The application reports exactly one of three distinct outcomes:
+The verification engine compares the browser-computed SHA-256 digest against the on-chain record returned by `get_record(record_id)` and presents exactly one of three clear outcomes:
 
-| Outcome | Visual Badge | Explanation |
+| Outcome | Visual Status | What It Means |
 | :--- | :--- | :--- |
-| **MATCH** | 🟢 **MATCH** | The Record ID exists, and the selected file's calculated SHA-256 digest is **identical** to the registered fingerprint. |
-| **MISMATCH** | 🟠 **MISMATCH** | The Record ID exists, but the selected file's SHA-256 digest **differs** from the stored fingerprint. This file is not identical to the registered version. |
-| **RECORD NOT FOUND** | ⚪ **RECORD NOT FOUND** | No registration exists for the provided Record ID. The user is invited to check the Record ID for typographical errors. |
-
-> [!NOTE]
-> An unknown Record ID is **never** classified as a mismatch. Mismatch occurs strictly when a valid record exists on-chain with a different fingerprint.
+| **MATCH** | 🟢 **MATCH** | The selected file's calculated SHA-256 digest is **identical** to the fingerprint registered on Tezos Shadownet for that Record ID. |
+| **MISMATCH** | 🟠 **MISMATCH** | A valid registration exists on-chain for this Record ID, but the selected file's SHA-256 digest **differs**. The file has been modified or does not match the registered version. |
+| **RECORD NOT FOUND** | ⚪ **RECORD NOT FOUND** | No registration exists on Tezos Shadownet for the supplied Record ID. *(An unknown ID is never classified as a mismatch.)* |
 
 ---
 
-<a id="important-limits--non-goals"></a>
-## Important Limits & Non-Goals
+## Technical Architecture
 
-To maintain security and trust, the following boundaries are enforced:
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Browser Client (React 18 + Vite)                │
+│                                                                        │
+│  [UI Components] ──▶ [Web Crypto API]  ──▶ Local SHA-256 Digest       │
+│         │                                                              │
+│         ├──▶ [tezosAdapter.ts] ───────▶ Taquito / Beacon / Temple      │
+│         │                                                              │
+│         └──▶ [supabaseCatalogue.ts] ──▶ Autocomplete & RLS Sync        │
+└───────────────┬───────────────────────────────────┬────────────────────┘
+                │ Direct RPC View / Tx              │ HTTPS (RLS)
+                ▼                                   ▼
+┌───────────────────────────────────────┐   ┌────────────────────────────┐
+│      Tezos Shadownet Testnet          │   │     Supabase Catalogue     │
+│                                       │   │                            │
+│  SmartPy Contract                     │   │  document_catalog table    │
+│  - register(record_id, label, sha256) │   │  - label                   │
+│  - get_record(record_id) [view]       │   │  - record_id               │
+│  - big_map: records                   │   │  - sha256_fingerprint      │
+└───────────────────────────────────────┘   └────────────────────────────┘
+```
 
-- **What a Match Proves**: A cryptographic match proves **strictly** that the selected file contains the exact same bytes as the file used to generate the registered fingerprint.
+### Smart Contract Specification
+
+The smart contract is written in [SmartPy](https://smartpy.io) and compiled to Michelson:
+
+- **Source Code**: [`contracts/document_registry.py`](contracts/document_registry.py)
+- **Target Network**: Tezos Shadownet testnet
+- **Write Entrypoint**: `register(params)`
+  - Parameter: `record(record_id: string, label: string, sha256: string)`
+  - Authorization check: Strictly requires `assert sp.sender == self.data.admin, "UNAUTHORIZED: Sender is not admin"`
+  - Integrity check: Prevents record ID collisions via `assert not (params.record_id in self.data.records)`
+  - Storage mapping: Records `{ label, sha256, registrar: sp.sender, registered_at: sp.now }`
+- **Read-Only View**: `get_record(record_id: string) -> sp.option[record_type]`
+  - Queries `self.data.records.get_opt(record_id)`
+  - Returns `Some(record)` when present, or `None` if missing
+
+### Tezos & Beacon Wallet Flow
+
+- **Toolkit**: Configured via `@taquito/taquito` and `@taquito/beacon-wallet`.
+- **Extension Integration**: Features a direct Beacon wallet provider flow that opens the native extension selection modal and connects seamlessly through "Use Extension".
+- **Disconnect Persistence**: Disconnection state is recorded in `localStorage` (`dart_wallet_explicitly_disconnected`) so browser extensions cannot silently auto-reconnect on refresh without explicit user action.
+
+### Supabase Catalogue Integration
+
+- **Search Autocomplete**: Allows users to type a document label and select matching records from the catalogue.
+- **Duplicate Detection**: Flags identical document labels and guides the user to verify by file contents.
+- **Row Level Security (RLS)**: Public users enjoy read-only search queries, while catalogue inserts require authenticated registrar sign-in.
+
+### Visual System & Dark Mode
+
+- **Brand Colors**:
+  - Primary Accent: **Raspberry** (`#5B3DF5` / `#7052ff`)
+  - Supporting Accent: **Pale Sky** (`#E8DEFF`)
+- **Theme Engine**:
+  - Defaults to Light Mode for first-time visitors.
+  - Implements the browser's native **View Transitions API** (`document.startViewTransition()`) to reveal Dark Mode outward in a radial circular wave from the toggle button coordinates.
+  - Preserves user preference in `localStorage` (`dart_theme`) and applies an early `<head>` script to guarantee zero flash of the wrong theme (FOUT) on reload.
+  - Fully accessible with `prefers-reduced-motion` compliance.
+
+---
+
+## Security & Trust Boundaries
+
+- **What a Match Proves**: A cryptographic match proves exclusively that the selected file's binary content matches the SHA-256 fingerprint anchored to that record ID on Tezos Shadownet.
 - **What a Match Does NOT Prove**:
-  - It does **not** prove who authored, created, or originally wrote the document.
-  - It does **not** certify that the document content is safe, accurate, legal, or officially approved.
-  - It does **not** detect whether a file is "counterfeit" or malicious.
-- **Privacy Enforcement**: Document contents are **never** uploaded to a server, IPFS, or Tezos. Only metadata (fingerprint, label, UUID, timestamp) is registered.
-- **Architectural Scope**: The project deliberately excludes user accounts, logins, file hosting, IPFS pinning, machine learning, and document editing.
+  - It does **not** certify that a file is authentic, safe, original, legally binding, or approved.
+  - It does **not** detect whether a document contains accurate information or malicious payload.
+- **Non-Goals**: D.A.R.T intentionally excludes cloud file storage, IPFS pinning, machine learning, counterfeit detection, and document editing to maintain strict privacy and focus.
 
 ---
 
@@ -192,9 +189,9 @@ To maintain security and trust, the following boundaries are enforced:
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) v18.0.0 or higher
+- [Node.js](https://nodejs.org/) v18.0.0 or higher (Node 20+ recommended)
 - [npm](https://www.npmjs.com/) v9.0.0 or higher
-- [Temple Wallet](https://templewallet.com/) browser extension (Chrome, Brave, Edge, or Firefox) with **Testnet Mode** enabled and connected to **Tezos Shadownet**.
+- A Tezos wallet browser extension (e.g., [Temple Wallet](https://templewallet.com/)) with **Tezos Shadownet** testnet configured and funded with testnet tez from the [Shadownet Faucet](https://teztnets.com/shadownet-about).
 
 ### Installation
 
@@ -206,172 +203,73 @@ cd document-integrity-registry
 npm install
 ```
 
-### Environment Configuration
+### Configuration
 
-The repository includes a template configuration file [`.env.example`](.env.example). Create your local `.env` file from the template:
+Copy the template environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Configure the required environment settings in your local `.env` file:
-- `VITE_TEZOS_NETWORK`: /* Private Data */
-- `VITE_TEZOS_RPC_URL`: /* Private Data */
-- `VITE_DOCUMENT_REGISTRY_ADDRESS`: /* Private Data */
-- `VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS`: /* Private Data */
+Configure your environment variables in `.env`:
+
+```env
+# Tezos Network Configuration (Target: Shadownet testnet only)
+VITE_TEZOS_NETWORK=shadownet
+VITE_TEZOS_RPC_URL=https://rpc.shadownet.teztnets.com
+
+# Deployed SmartPy KT1 address on Shadownet
+VITE_DOCUMENT_REGISTRY_ADDRESS=KT1...
+
+# Authorized registrar admin public address
+VITE_DOCUMENT_REGISTRY_ADMIN_ADDRESS=tz1...
+
+# Supabase Document Catalogue Configuration
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your-public-anon-key
+```
 
 > [!IMPORTANT]
-> Never put private keys, seed phrases, passwords, or secrets into `.env` or any project file. The `.env` file is excluded from Git via `.gitignore`. Do not commit real environment values to Git or paste them into documentation.
+> Never store, commit, or expose private keys, seed phrases, or database secrets. Only public addresses and public keys belong in `.env`.
 
-### Running the Website
+### Development Server
 
-<details>
-<summary><strong>View package scripts and execution modes</strong></summary>
+Start Vite with hot module replacement:
 
-The project supports the following scripts defined in [`package.json`](package.json):
-
-#### 1. Development Server
-Starts Vite with hot module replacement:
 ```bash
 npm run dev
 ```
-Default URL: `http://localhost:5173/`
 
-#### 2. Production Build
-Compiles TypeScript and builds minified production assets into `dist/`:
-```bash
-npm run build
-```
+Open [http://localhost:5173/](http://localhost:5173/) in your browser.
 
-#### 3. Production Preview Server
-Serves the compiled `dist/` directory locally:
-```bash
-npm run preview
-```
-Default URL: `http://localhost:4173/`
+### Testing & Quality Assurance
 
-</details>
-
-<a id="running-tests--type-checking"></a>
-### Running Tests & Type Checking
-
-The test suite covers SHA-256 hash formatting, UUID validation, label constraints, option record normalization, match/mismatch/not-found logic, and live Shadownet RPC on-chain view queries:
+The test suite covers local Web Crypto hashing, UUID generation, Supabase catalogue search and debouncing, theme state management, option record decoding, and live Shadownet RPC queries:
 
 ```bash
-# Run Vitest test suite once (20 tests)
+# Run unit test suite (50 tests)
 npm run test
 
 # Run tests in watch mode
 npm run test:watch
 
-# Run TypeScript type check (strict, no emit)
+# Run TypeScript type check (strict, noEmit)
 npm run typecheck
 ```
 
----
+### Production Build
 
-<a id="deep-dive--technical-details"></a>
-## Deep Dive & Technical Details
+Compile TypeScript and build the optimized production bundle:
 
-<a id="browser-side-cryptography"></a>
-<details>
-<summary><strong>Browser-Side Cryptography (Web Crypto API)</strong></summary>
-
-Fingerprints are computed entirely inside the browser using standard web standards implemented in [`src/services/crypto.ts`](src/services/crypto.ts):
-
-```typescript
-export async function computeFileSha256(file: File): Promise<string> {
-  const arrayBuffer = await file.arrayBuffer();
-  const digestBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
-  const hashArray = Array.from(new Uint8Array(digestBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('').toLowerCase();
-}
+```bash
+npm run build
 ```
 
-- Input: `File` object from `<input type="file">` or Drag-and-Drop.
-- Output: A normalized string containing exactly 64 lowercase hexadecimal characters `[0-9a-f]{64}`.
+Preview the production build locally:
 
-</details>
-
-<a id="dual-wallet-integration--polyfills"></a>
-<details>
-<summary><strong>Dual Wallet Integration & Browser Polyfills</strong></summary>
-
-Connecting Temple Wallet on Vite requires addressing browser compatibility differences between Node.js packages and browser ESM environments:
-
-1. **Dual Wallet Strategy** in [`src/services/tezosAdapter.ts`](src/services/tezosAdapter.ts):
-   - First checks `@temple-wallet/dapp`'s direct extension provider (`TempleWallet.isAvailable()`).
-   - Falls back gracefully to `@taquito/beacon-wallet` (`BeaconWallet.requestPermissions()`).
-2. **Buffer Polyfill** in [`src/polyfills/buffer.ts`](src/polyfills/buffer.ts):
-   - `@airgap/beacon-dapp` internally requires `Buffer.from()` during secret initialization (`loadOrCreateBeaconSecret`).
-   - The polyfill attaches `Buffer` to `window.Buffer` and `globalThis.Buffer` in browser runtimes while preserving native Node.js buffers in test environments.
-3. **Crypto Polyfill** in [`src/polyfills/crypto.ts`](src/polyfills/crypto.ts):
-   - Aliased in [`vite.config.ts`](vite.config.ts) to eliminate Vite externalization warnings for packages importing Node's built-in `crypto` module.
-
-</details>
-
-<a id="smartpy-contract-code--compilation"></a>
-<details>
-<summary><strong>SmartPy Contract Code & Compilation</strong></summary>
-
-The smart contract [`contracts/document_registry.py`](contracts/document_registry.py) is authored in SmartPy (v0.24+):
-
-- **Data Structure**:
-  ```python
-  self.data.records = sp.cast(sp.big_map(), sp.big_map[sp.string, record_type])
-  ```
-- **Entrypoint Logic**:
-  ```python
-  @sp.entrypoint
-  def register(self, params: register_params_type):
-      sp.cast(params, register_params_type)
-      assert sp.sender == self.data.admin, "UNAUTHORIZED: Sender is not admin"
-      assert not (params.record_id in self.data.records), "RECORD_EXISTS: Record ID already registered"
-      self.data.records[params.record_id] = sp.record(
-          label=params.label,
-          sha256=params.sha256,
-          registrar=sp.sender,
-          registered_at=sp.now,
-      )
-  ```
-- **View Logic**:
-  ```python
-  @sp.onchain_view()
-  def get_record(self, record_id: sp.string) -> sp.option[record_type]:
-      return self.data.records.get_opt(record_id)
-  ```
-- **Tests**: Includes automated simulation scenario `DocumentRegistry_Tests` validating admin authorization, duplicate rejection, and missing record handling.
-
-</details>
-
----
-
-<a id="troubleshooting--faq"></a>
-## Troubleshooting & FAQ
-
-<details>
-<summary><strong>How do I get Tezos Shadownet test tez?</strong></summary>
-
-To register documents, your admin account needs testnet tez for gas:
-1. Open [Tezos Shadownet Faucet](https://teztnets.com/shadownet-about).
-2. Request test tez to your public Temple account address.
-3. Transactions on Shadownet confirm in roughly 8 to 15 seconds.
-
-</details>
-
-<details>
-<summary><strong>Why does wallet connection prompt for Temple / Beacon?</strong></summary>
-
-The website supports both Temple's direct browser provider and Beacon. If Temple extension is installed and unlocked with Shadownet enabled, clicking **Connect Temple wallet** will open Temple's permission dialog. If the Beacon modal appears, simply click **Temple Wallet** to open the popup.
-
-</details>
-
-<details>
-<summary><strong>Why does verification work without connecting my wallet?</strong></summary>
-
-Verification uses Tezos on-chain views (`get_record`). On-chain views are read-only queries executed against the public Tezos RPC node. Because read queries do not modify state or consume tez, no signature, wallet connection, or transaction fee is required.
-
-</details>
+```bash
+npm run preview
+```
 
 ---
 
@@ -380,43 +278,49 @@ Verification uses Tezos on-chain views (`get_record`). On-chain views are read-o
 ```
 .
 ├── contracts/
-│   └── document_registry.py       # SmartPy contract source & test scenarios
+│   └── document_registry.py          # SmartPy smart contract source & simulation tests
 ├── public/
-│   └── favicon.svg                # Application favicon
+│   └── favicon.svg                   # D.A.R.T shield favicon
 ├── src/
-│   ├── components/                # Modular React visual components
-│   │   ├── FactualStrip.tsx       # Core architectural principles banner
-│   │   ├── Footer.tsx             # Network, contract, and security footer
-│   │   ├── Header.tsx             # Sticky navbar, brand, and wallet controls
-│   │   ├── Hero.tsx               # Hero copy and SVG cryptographic flow diagram
-│   │   ├── HowItWorks.tsx         # Dark 4-step process cards
-│   │   ├── LimitationNotice.tsx   # Meaning and limitations of hash matches
-│   │   ├── RegisterSection.tsx    # Admin document registration panel
-│   │   └── VerifySection.tsx      # Read-only verification panel & diff outcomes
+│   ├── components/                   # Modular React UI components
+│   │   ├── FactualStrip.tsx          # Architectural principles banner
+│   │   ├── Footer.tsx                # Security notes and network info
+│   │   ├── Header.tsx                # Responsive navbar, theme toggle & wallet controls
+│   │   ├── Hero.tsx                  # Hero section with interactive SVG lifecycle flow
+│   │   ├── HowItWorks.tsx            # 4-step process cards
+│   │   ├── LimitationNotice.tsx      # Cryptographic limitation disclosure
+│   │   ├── RegisterSection.tsx       # Registrar document registration & catalogue sync
+│   │   └── VerifySection.tsx         # Public document verification & label autocomplete
 │   ├── config/
-│   │   └── tezos.ts               # Centralized Tezos network & contract configuration
+│   │   ├── supabase.ts               # Supabase client & environment configuration
+│   │   └── tezos.ts                  # Tezos Shadownet network & contract settings
 │   ├── polyfills/
-│   │   ├── buffer.ts              # Browser Buffer polyfill for Beacon SDK
-│   │   └── crypto.ts              # Web Crypto fallback polyfill
+│   │   ├── buffer.ts                 # Browser Buffer polyfill for Beacon SDK
+│   │   └── crypto.ts                 # Web Crypto polyfill alias
 │   ├── services/
-│   │   ├── crypto.ts              # Local SHA-256 calculation & UUID generation
-│   │   └── tezosAdapter.ts        # Typed Taquito/Beacon/Temple on-chain adapter
+│   │   ├── crypto.ts                 # Local SHA-256 computation & UUID v4 generator
+│   │   ├── supabaseCatalogue.ts      # Catalogue search, debounce & RLS insert service
+│   │   └── tezosAdapter.ts           # Taquito/Beacon on-chain adapter & session store
 │   ├── test/
-│   │   ├── adapter.test.ts        # Contract normalization & live RPC tests
-│   │   └── crypto.test.ts         # SHA-256 and UUID unit tests
+│   │   ├── adapter.test.ts           # Contract invariants & live RPC view tests
+│   │   ├── crypto.test.ts            # Hashing and UUID unit tests
+│   │   ├── supabaseCatalogue.test.ts # Catalogue search, duplicate & auth tests
+│   │   └── theme.test.ts             # Dark mode state, persistence & motion tests
 │   ├── types/
-│   │   └── registry.ts            # TypeScript interfaces and result types
-│   ├── App.tsx                    # Root application component & tab switcher
-│   ├── index.css                  # Design tokens, typography & component styling
-│   └── main.tsx                   # React DOM application entrypoint
-├── .env.example                   # Environment configuration template
-├── .gitignore                     # Git ignore rules (excludes .env, secrets, build)
-├── Gemini.md                      # Project requirements specification
-├── guidelines.md                  # Visual system & architectural guidelines
-├── index.html                     # HTML5 shell & Google Fonts imports
-├── package.json                   # Project dependencies and npm scripts
-├── tsconfig.json                  # TypeScript compiler configuration
-└── vite.config.ts                 # Vite bundler configuration & polyfill aliases
+│   │   └── registry.ts               # TypeScript data interfaces & outcome models
+│   ├── utils/
+│   │   └── theme.ts                  # View Transitions radial reveal theme utility
+│   ├── App.tsx                       # Main layout, tab navigation & scroll manager
+│   ├── index.css                     # Complete visual design system & dark mode tokens
+│   └── main.tsx                      # Application bootstrapping
+├── .env.example                      # Configuration template
+├── .gitignore                        # Git exclusion rules
+├── GEMINI.md                         # Core project requirements and fixed contract rules
+├── guidelines.md                     # Architectural specifications and invariants
+├── index.html                        # Application shell with zero-FOUT theme init script
+├── package.json                      # Project dependencies & npm scripts
+├── tsconfig.json                     # Strict TypeScript configuration
+└── vite.config.ts                    # Vite configuration & build polyfills
 ```
 
 ---

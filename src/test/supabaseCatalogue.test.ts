@@ -3,11 +3,130 @@ import * as supabaseConfig from '../config/supabase';
 import {
   searchDocumentsByLabel,
   insertDocumentToCatalog,
+  checkLabelAvailability,
+  normalizeLabel,
 } from '../services/supabaseCatalogue';
 
 describe('Supabase Catalogue Service', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe('normalizeLabel helper', () => {
+    it('normalizes label by trimming whitespace and converting to lowercase', () => {
+      expect(normalizeLabel('Onam Poster')).toBe('onam poster');
+      expect(normalizeLabel('  Onam Poster  ')).toBe('onam poster');
+      expect(normalizeLabel('ONAM POSTER')).toBe('onam poster');
+      expect(normalizeLabel('   ')).toBe('');
+    });
+  });
+
+  describe('checkLabelAvailability pre-flight checks', () => {
+    it('returns available: false if client is not configured', async () => {
+      vi.spyOn(supabaseConfig, 'getSupabaseClient').mockReturnValue(null);
+      const res = await checkLabelAvailability('Annual Report');
+      expect(res.available).toBe(false);
+      expect(res.error).toContain('not configured');
+    });
+
+    it('returns available: false if label is empty whitespace', async () => {
+      const mockClient = { from: vi.fn() } as any;
+      vi.spyOn(supabaseConfig, 'getSupabaseClient').mockReturnValue(mockClient);
+      const res = await checkLabelAvailability('   ');
+      expect(res.available).toBe(false);
+      expect(res.error).toBe('Label cannot be empty.');
+      expect(mockClient.from).not.toHaveBeenCalled();
+    });
+
+    it('returns available: true when no matching label exists in catalogue', async () => {
+      const mockSelect = vi.fn().mockReturnValue({
+        ilike: vi.fn().mockResolvedValue({
+          data: [],
+          error: null,
+        }),
+      });
+      const mockClient = {
+        from: vi.fn().mockReturnValue({ select: mockSelect }),
+      } as any;
+      vi.spyOn(supabaseConfig, 'getSupabaseClient').mockReturnValue(mockClient);
+
+      const res = await checkLabelAvailability('New Document Label');
+      expect(res.available).toBe(true);
+      expect(res.isDuplicate).toBeUndefined();
+    });
+
+    it('detects existing label with exact case match and returns required error message', async () => {
+      const mockSelect = vi.fn().mockReturnValue({
+        ilike: vi.fn().mockResolvedValue({
+          data: [{ record_id: 'rec-1', label: 'Onam Poster' }],
+          error: null,
+        }),
+      });
+      const mockClient = {
+        from: vi.fn().mockReturnValue({ select: mockSelect }),
+      } as any;
+      vi.spyOn(supabaseConfig, 'getSupabaseClient').mockReturnValue(mockClient);
+
+      const res = await checkLabelAvailability('Onam Poster');
+      expect(res.available).toBe(false);
+      expect(res.isDuplicate).toBe(true);
+      expect(res.existingRecordId).toBe('rec-1');
+      expect(res.error).toBe('This label is already registered. Please choose a different label.');
+    });
+
+    it('detects duplicate across capitalization differences ("onam poster" vs "Onam Poster")', async () => {
+      const mockSelect = vi.fn().mockReturnValue({
+        ilike: vi.fn().mockResolvedValue({
+          data: [{ record_id: 'rec-1', label: 'Onam Poster' }],
+          error: null,
+        }),
+      });
+      const mockClient = {
+        from: vi.fn().mockReturnValue({ select: mockSelect }),
+      } as any;
+      vi.spyOn(supabaseConfig, 'getSupabaseClient').mockReturnValue(mockClient);
+
+      const res = await checkLabelAvailability('onam poster');
+      expect(res.available).toBe(false);
+      expect(res.isDuplicate).toBe(true);
+      expect(res.error).toBe('This label is already registered. Please choose a different label.');
+    });
+
+    it('detects duplicate across surrounding whitespace differences ("  Onam Poster  ")', async () => {
+      const mockSelect = vi.fn().mockReturnValue({
+        ilike: vi.fn().mockResolvedValue({
+          data: [{ record_id: 'rec-1', label: 'Onam Poster' }],
+          error: null,
+        }),
+      });
+      const mockClient = {
+        from: vi.fn().mockReturnValue({ select: mockSelect }),
+      } as any;
+      vi.spyOn(supabaseConfig, 'getSupabaseClient').mockReturnValue(mockClient);
+
+      const res = await checkLabelAvailability('   Onam Poster   ');
+      expect(res.available).toBe(false);
+      expect(res.isDuplicate).toBe(true);
+      expect(res.error).toBe('This label is already registered. Please choose a different label.');
+    });
+
+    it('returns helpful error if availability query fails rather than assuming available', async () => {
+      const mockSelect = vi.fn().mockReturnValue({
+        ilike: vi.fn().mockResolvedValue({
+          data: null,
+          error: { message: 'connection timeout' },
+        }),
+      });
+      const mockClient = {
+        from: vi.fn().mockReturnValue({ select: mockSelect }),
+      } as any;
+      vi.spyOn(supabaseConfig, 'getSupabaseClient').mockReturnValue(mockClient);
+
+      const res = await checkLabelAvailability('Bylaws');
+      expect(res.available).toBe(false);
+      expect(res.isDuplicate).toBeUndefined();
+      expect(res.error).toContain('Catalogue verification failed: connection timeout');
+    });
   });
 
   it('searchDocumentsByLabel returns empty list if client is not configured', async () => {
@@ -128,5 +247,27 @@ describe('Supabase Catalogue Service', () => {
     expect(res.success).toBe(false);
     expect(res.isRlsError).toBe(true);
     expect(res.error).toContain('Row Level Security');
+  });
+
+  it('insertDocumentToCatalog formats label unique constraint violation with friendly explanation', async () => {
+    const mockInsert = vi.fn().mockResolvedValue({
+      error: {
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "document_catalog_normalized_label_idx"',
+        details: 'Key (lower(btrim(label)))=(annual financial report 2026) already exists.',
+      },
+    });
+    const mockFrom = vi.fn().mockReturnValue({ insert: mockInsert });
+    const mockClient = { from: mockFrom } as any;
+    vi.spyOn(supabaseConfig, 'getSupabaseClient').mockReturnValue(mockClient);
+
+    const res = await insertDocumentToCatalog({
+      record_id: 'a0000000-0000-0000-0000-000000000002',
+      label: 'Annual Financial Report 2026',
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.isDuplicateLabelError).toBe(true);
+    expect(res.error).toBe('This label is already registered. Please choose a different label.');
   });
 });

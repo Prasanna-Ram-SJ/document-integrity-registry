@@ -4,8 +4,40 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Document Integrity Registry</title>
-    <meta name="description" content="Calculate a SHA-256 fingerprint in your browser, register it with a label on Tezos Shadownet, and later check a copy using its record ID." />
+    <title>D.A.R.T – Decentralized Authentication and Record Tracking</title>
+    <meta name="description" content="Check whether a document matches its registered version. DART compares digital fingerprints with records on Tezos and gives you a clear Match or Mismatch result." />
+    <script>
+      (function() {
+        try {
+          var savedTheme = localStorage.getItem('dart_theme');
+          if (savedTheme === 'dark') {
+            document.documentElement.classList.add('dark');
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.style.colorScheme = 'dark';
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.documentElement.style.colorScheme = 'light';
+          }
+        } catch (e) {}
+
+        try {
+          var isReload = false;
+          var entries = performance.getEntriesByType('navigation');
+          if (entries && entries.length > 0) {
+            isReload = entries[0].type === 'reload';
+          } else if (performance.navigation) {
+            isReload = performance.navigation.type === 1;
+          }
+          if (isReload) {
+            if ('scrollRestoration' in history) {
+              history.scrollRestoration = 'manual';
+            }
+            window.scrollTo(0, 0);
+          }
+        } catch (e) {}
+      })();
+    </script>
     <!-- Typography: Host Grotesk and Instrument Sans -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
