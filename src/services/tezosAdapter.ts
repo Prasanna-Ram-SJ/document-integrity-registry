@@ -28,8 +28,8 @@ export function getTezosToolkit(): TezosToolkit {
 export function getBeaconWallet(): BeaconWallet {
   if (!walletInstance) {
     const networkType =
-      TEZOS_CONFIG.network.toLowerCase() === 'shadownet'
-        ? NetworkType.SHADOWNET
+      'SHADOWNET' in NetworkType
+        ? (NetworkType as unknown as Record<string, NetworkType>)['SHADOWNET']
         : NetworkType.CUSTOM;
 
     walletInstance = new BeaconWallet({

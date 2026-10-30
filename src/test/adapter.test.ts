@@ -1,4 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('@taquito/beacon-wallet', () => ({
+  BeaconWallet: vi.fn().mockImplementation(() => ({
+    client: { getActiveAccount: vi.fn().mockResolvedValue(null) },
+    requestPermissions: vi.fn().mockResolvedValue(undefined),
+    getPKH: vi.fn().mockResolvedValue('tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb'),
+  })),
+}));
+
+vi.mock('@airgap/beacon-dapp', () => ({
+  NetworkType: { CUSTOM: 'custom', SHADOWNET: 'shadownet' },
+}));
+
 import { normalizeRecordOption, evaluateVerification } from '../services/tezosAdapter';
 import { DocumentRecord } from '../types/registry';
 
