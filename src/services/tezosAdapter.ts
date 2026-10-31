@@ -520,7 +520,7 @@ export async function registerDocumentOnChain(
     return {
       step: 'UNAUTHORIZED',
       registrar: activeAddress,
-      errorMessage: `Connected account (${activeAddress}) is not authorized as the registrar admin (${TEZOS_CONFIG.adminAddress}).`,
+      errorMessage: 'This wallet is not authorized to register documents. Please connect an authorized registrar wallet.',
     };
   }
 
@@ -605,7 +605,7 @@ export async function registerDocumentOnChain(
       return {
         step: 'UNAUTHORIZED',
         registrar: activeAddress,
-        errorMessage: 'Registration failed: only the configured admin address may register documents.',
+        errorMessage: 'This wallet is not authorized to register documents. Please connect an authorized registrar wallet.',
       };
     }
 

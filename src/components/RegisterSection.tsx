@@ -559,7 +559,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
             <line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
           <div>
-            <strong>Unauthorized Account:</strong> Connected account (<code>{walletState.address}</code>) is not the configured registrar admin (<code>{TEZOS_CONFIG.adminAddress}</code>). Registration requires administrator authorization.
+            <strong>Unauthorized Account:</strong> This wallet is not authorized to register documents. Please connect an authorized registrar wallet.
           </div>
         </div>
       )}
@@ -737,7 +737,7 @@ export const RegisterSection: React.FC<RegisterSectionProps> = ({
           {outcome?.step === 'PENDING_CONFIRMATION' && 'Waiting for Tezos Shadownet confirmation.'}
           {outcome?.step === 'CONFIRMED' && 'Document version successfully registered on Tezos Shadownet.'}
           {outcome?.step === 'REJECTED' && 'Transaction declined in wallet.'}
-          {outcome?.step === 'UNAUTHORIZED' && 'Registration unauthorized: only the configured admin may register.'}
+          {outcome?.step === 'UNAUTHORIZED' && 'This wallet is not authorized to register documents. Please connect an authorized registrar wallet.'}
           {outcome?.step === 'DUPLICATE_ID' && 'A document with this record ID already exists.'}
           {outcome?.step === 'FAILED' && `Registration failed: ${outcome.errorMessage}`}
         </div>
