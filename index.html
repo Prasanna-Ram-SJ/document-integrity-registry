@@ -37,6 +37,8 @@
           }
         } catch (e) {}
       })();
+      window.global = window;
+      window.process = window.process || { env: {}, browser: true, version: '' };
     </script>
     <!-- Typography: Host Grotesk and Instrument Sans -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
