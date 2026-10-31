@@ -1,5 +1,6 @@
 import React from 'react';
 import { TEZOS_CONFIG } from '../config/tezos';
+import dartLogo from '../assets/dart-logo.png';
 
 export const Footer: React.FC = () => {
   return (
@@ -7,7 +8,16 @@ export const Footer: React.FC = () => {
       <div className="container">
         <div className="footer-top">
           <div>
-            <div className="footer-brand-title">D.A.R.T</div>
+            <div className="footer-brand-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <img
+                src={dartLogo}
+                alt="D.A.R.T logo"
+                width="28"
+                height="28"
+                style={{ objectFit: 'contain', display: 'block' }}
+              />
+              <span>D.A.R.T</span>
+            </div>
             <p className="footer-desc">
               Decentralized Authentication and Record Tracking (D.A.R.T) on Tezos Shadownet. Built for student clubs and project teams.
             </p>
